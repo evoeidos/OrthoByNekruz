@@ -23,10 +23,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             [
               {
                 text: '💎 Открыть ByNekruz',
-                // ВАЖНО: попробуй сначала системную ссылку бота, 
-                // если не сработает - оставляй Vercel, но через кнопку Mini App
                 web_app: {
-                  url: 'https://ortho-by-nekruz.vercel.app/' 
+                  url: 'https://nekruz2000n-eng-orthobynekruz-91ba.twc1.net/'
                 }
               }
             ]

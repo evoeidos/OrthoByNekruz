@@ -4,7 +4,7 @@ import { Redis } from '@upstash/redis';
 const redis = Redis.fromEnv();
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_TG_ID = process.env.ADMIN_TG_ID;
-const ADMIN_URL = process.env.ADMIN_URL || 'https://ortho-by-nekruz.vercel.app/admin';
+const ADMIN_URL = process.env.ADMIN_URL || 'https://nekruz2000n-eng-orthobynekruz-91ba.twc1.net/admin';
 const CHANNEL_USERNAME = 'nzsdental';
 
 async function isSubscribed(userId: number): Promise<boolean> {
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
             chat_id: chatId,
             text: 'Привет! 🦷\nТвой помощник готов к работе:',
             reply_markup: {
-              inline_keyboard: [[{ text: '🚀 Открыть ByNekruz', web_app: { url: 'https://ortho-by-nekruz.vercel.app/', fullscreen: true } }]],
+              inline_keyboard: [[{ text: '🚀 Открыть ByNekruz', web_app: { url: 'https://nekruz2000n-eng-orthobynekruz-91ba.twc1.net/', fullscreen: true } }]],
             },
           }),
         });
