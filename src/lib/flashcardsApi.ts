@@ -12,6 +12,7 @@ export async function fetchWeakFlashcards(subject: string): Promise<Set<string>>
   try {
     const res = await fetch('/api/flashcards', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(tgAuthBody({ subject, mode: 'list' })),
     });
@@ -32,6 +33,7 @@ export async function markFlashcardWeak(
   try {
     await fetch('/api/flashcards', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(tgAuthBody({
         subject,
@@ -51,6 +53,7 @@ export async function markFlashcardKnown(
   try {
     await fetch('/api/flashcards', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(tgAuthBody({
         subject,

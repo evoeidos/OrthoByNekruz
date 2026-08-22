@@ -1,8 +1,7 @@
-// pages/api/ping.ts  ← Pages Router формат
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
-import { verifyInitDataId } from '@/lib/verifyInitData';
 import { touchUserVisit } from '@/lib/userActivity';
+import { resolveRequestIdentity } from '@/lib/resolveIdentity';
 
 const redis            = createRedisFromEnv();
 const BOT_TOKEN        = process.env.BOT_TOKEN    || '';
@@ -44,15 +43,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const { telegramId, initData } = req.body;
 
-    if (!telegramId || !initData) {
-      console.error('[ping] Missing telegramId or initData');
+    if (!telegramId) {
+      console.error('[ping] Missing telegramId');
       return res.status(400).json({ ok: false, reason: 'missing' });
     }
 
-    const userId = verifyInitDataId(initData, BOT_TOKEN);
-    if (!userId || String(userId) !== String(telegramId)) {
-      console.error('[ping] auth failed. userId:', userId, 'tgId:', telegramId);
-      return res.status(401).json({ ok: false, reason: 'auth' });
+    const identity = await resolveRequestIdentity(redis, req, {
+      telegramId,
+      initData,
+      requireTelegram: true,
+    });
+    if (!identity.ok || identity.tgId !== String(telegramId)) {
+      console.error('[ping] auth failed', identity);
+      return res.status(401).json({
+        ok: false,
+        reason: 'auth',
+        code: identity.ok ? undefined : identity.code,
+      });
     }
 
     const tgId  = String(telegramId);

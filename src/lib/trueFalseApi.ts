@@ -20,6 +20,7 @@ export async function saveTrueFalseSession(
   try {
     await fetch('/api/true-false', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(tgAuthBody({
         subject,
@@ -38,6 +39,7 @@ export async function fetchWeakTrueFalseTopics(subject: string): Promise<Set<str
   try {
     const res = await fetch('/api/true-false', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(tgAuthBody({ subject, mode: 'list_weak' })),
     });

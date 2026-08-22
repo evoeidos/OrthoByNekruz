@@ -73,6 +73,7 @@ async function fetchFromServer(subject: string, type: SubjectDataType): Promise<
   try {
     const r = await fetch('/api/subject-data', {
       method:  'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ subject, type, telegramId: tgId, initData: initDat }),
     });

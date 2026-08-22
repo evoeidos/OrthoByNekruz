@@ -4,6 +4,7 @@ import { USER_FACULTY_ID_KEY } from '@/lib/facultyCodes';
 export const AUTH_STORAGE_KEYS = [
   'is_authed',
   'user_tg_id',
+  'auth_via',
   'available_subjects',
   'subject_chosen',
   'has_micro',
@@ -44,16 +45,21 @@ export function clearSubjectPickedSession(): void {
   sessionStorage.removeItem(SESSION_SUBJECT_PICKED_KEY);
 }
 
-/** Сессия валидна, если TG ID в localStorage совпадает с текущим WebApp. */
+/** Сессия валидна: TG Mini App id совпадает, либо веб-вход (auth_via=web). */
 export function validateClientSession(): boolean {
   if (typeof window === 'undefined') return false;
   if (!readClientAuthFlag()) return false;
 
   const storedId = localStorage.getItem('user_tg_id');
+  const viaWeb = localStorage.getItem('auth_via') === 'web';
   const currentId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id;
   if (currentId && storedId && String(currentId) !== storedId) {
     clearLocalSession();
     return false;
   }
-  return true;
+  if (viaWeb && !storedId) {
+    // веб без привязки TG — ещё не полный вход в приложение
+    return false;
+  }
+  return !!storedId;
 }

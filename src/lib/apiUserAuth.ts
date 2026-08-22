@@ -1,34 +1,42 @@
 import { createRedisFromEnv } from '@/lib/redis';
-import { verifyInitDataId } from '@/lib/verifyInitData';
 import { getUserAvailableSubjects } from '@/lib/subjects';
 import { hasFinalizedPreviewAccess, isPreviewFlowInProgress } from '@/lib/previewStateMachine';
+import { resolveRequestIdentity } from '@/lib/resolveIdentity';
+import type { NextApiRequest } from 'next';
 
 const redis = createRedisFromEnv();
-const BOT_TOKEN = process.env.BOT_TOKEN || '';
 
 export type ApiUserAuthResult =
   | { ok: true; tgId: string; user: Record<string, unknown> }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; code?: string };
 
-/** Проверка initData + наличие аккаунта с доступом к контенту (не гость на витрине). */
+type VerifyOpts = {
+  req?: NextApiRequest | null;
+  cookieHeader?: string | null;
+};
+
+/** Проверка initData или веб-сессии + пользователь с доступом к контенту. */
 export async function verifyApiStudyUser(
   initData: unknown,
   telegramId: unknown,
+  opts?: VerifyOpts,
 ): Promise<ApiUserAuthResult> {
-  if (!BOT_TOKEN) {
-    return { ok: false, status: 503, error: 'Сервис временно недоступен' };
+  const identity = await resolveRequestIdentity(redis, opts?.req ?? null, {
+    telegramId,
+    initData,
+    requireTelegram: true,
+    cookieHeader: opts?.cookieHeader,
+  });
+  if (!identity.ok) {
+    return {
+      ok: false,
+      status: identity.status,
+      error: identity.error,
+      code: identity.code,
+    };
   }
 
-  const tgId = String(telegramId ?? '').trim();
-  if (!tgId || !initData) {
-    return { ok: false, status: 401, error: 'Требуется авторизация' };
-  }
-
-  const verifiedId = verifyInitDataId(String(initData), BOT_TOKEN);
-  if (!verifiedId || String(verifiedId) !== tgId) {
-    return { ok: false, status: 401, error: 'Неверная сессия' };
-  }
-
+  const tgId = identity.tgId;
   const user = await redis.get<Record<string, unknown>>(`user_id:${tgId}`);
   if (!user || user.blocked === true) {
     return { ok: false, status: 403, error: 'Доступ запрещён' };

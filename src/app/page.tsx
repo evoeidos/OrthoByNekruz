@@ -10,7 +10,7 @@ import { FacultyPickerModal } from '@/components/FacultyPickerModal';
 import { ChannelCodeEntryScreen } from '@/components/ChannelCodeEntryScreen';
 import { AccessWelcomeOverlay, PREVIEW_AWAITING_CONFIRM_KEY, PREVIEW_WELCOME_SEEN_KEY } from '@/components/AccessWelcomeOverlay';
 import { GroupAccessHintModal } from '@/components/GroupAccessHintModal';
-import { AuthScreen }    from '@/components/AuthScreen';
+import { AuthGate }     from '@/components/AuthGate';
 import { Navigation, TabType, type BioGameMode } from '@/components/Navigation';
 import { QuestionsTab }  from '@/components/QuestionsTab';
 import { TestsTab }      from '@/components/TestsTab';
@@ -610,12 +610,14 @@ export default function Home() {
 
     const tgId    = localStorage.getItem('user_tg_id');
     const initDat = (window as any).Telegram?.WebApp?.initData || '';
-    if (!tgId || !initDat) return;
+    const viaWeb  = localStorage.getItem('auth_via') === 'web';
+    if (!tgId || (!initDat && !viaWeb)) return;
 
     const gen = ++previewPollGen.current;
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ telegramId: tgId, mode: 'check_subjects', initData: initDat }),
       });
@@ -637,12 +639,14 @@ export default function Home() {
     if (typeof document !== 'undefined' && document.hidden) return;
     const tgId    = localStorage.getItem('user_tg_id');
     const initDat = (window as any).Telegram?.WebApp?.initData || '';
-    if (!tgId || !initDat) return;
+    const viaWeb  = localStorage.getItem('auth_via') === 'web';
+    if (!tgId || (!initDat && !viaWeb)) return;
 
     const gen = ++accessRequestGen.current;
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ telegramId: tgId, mode: 'check_subjects', initData: initDat }),
       });
@@ -698,7 +702,8 @@ export default function Home() {
     setAccessChecked(false);
     const gen = ++accessRequestGen.current;
     return fetch('/api/auth', {
-      method:  'POST',
+        method: 'POST',
+        credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ telegramId: tgId, mode: 'check_subjects', initData: initDat }),
     })
@@ -744,6 +749,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           telegramId: tgId,
@@ -781,9 +787,11 @@ export default function Home() {
     const timer = setTimeout(() => {
       const tgId    = localStorage.getItem('user_tg_id');
       const initDat = (window as any).Telegram?.WebApp?.initData || '';
-      if (!tgId || !initDat) return;
+      const viaWeb  = localStorage.getItem('auth_via') === 'web';
+      if (!tgId || (!initDat && !viaWeb)) return;
       fetch('/api/ping', {
-        method:  'POST',
+        method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ telegramId: tgId, initData: initDat }),
       })
@@ -821,7 +829,8 @@ export default function Home() {
 
     const gen = ++accessRequestGen.current;
     fetch('/api/auth', {
-      method:  'POST',
+        method: 'POST',
+        credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ telegramId: tgId, mode: 'check_subjects', initData: initDat }),
     })
@@ -872,13 +881,15 @@ export default function Home() {
     if (previewSyncBusyRef.current) return;
     const initDat = (window as any).Telegram?.WebApp?.initData || '';
     const testAccount = isPreviewShortDurationAccount(tgId);
-    if (!tgId || (!initDat && !testAccount)) return;
+    const viaWeb = localStorage.getItem('auth_via') === 'web';
+    if (!tgId || (!initDat && !testAccount && !viaWeb)) return;
     const activeModule = tabToModule(activeTab);
     previewSyncBusyRef.current = true;
     previewActiveDeltaRef.current = 0;
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           telegramId: tgId,
@@ -997,6 +1008,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ telegramId: tgId, mode: 'check_preview_status', initData: initDat }),
       });
@@ -1036,6 +1048,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           telegramId: tgId,
@@ -1075,7 +1088,8 @@ export default function Home() {
     setFacultyPickSaving(true);
     try {
       const res = await fetch('/api/auth', {
-        method:  'POST',
+        method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
           telegramId: tgId,
@@ -1113,6 +1127,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           telegramId: tgId,
@@ -1148,6 +1163,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           telegramId: tgId,
@@ -1184,6 +1200,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           telegramId: tgId,
@@ -1231,6 +1248,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           telegramId: tgId,
@@ -1268,6 +1286,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           telegramId: tgId,
@@ -1331,6 +1350,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/auth', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           telegramId: tgId,
@@ -1729,7 +1749,7 @@ export default function Home() {
   }
 
   if (!isAuthenticated) {
-    return <AuthScreen onAuthenticated={onAuthenticated} />;
+    return <AuthGate onAuthenticated={onAuthenticated} />;
   }
 
   if (showChannelCode) {

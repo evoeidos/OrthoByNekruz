@@ -30,7 +30,6 @@ import { filterBioTasksForFaculty, resolveBioFacultyId, resolveBioTasksFile } fr
 import { filterChemTasksForFaculty, resolveChemFacultyId, resolveChemTasksFile } from '@/lib/chemTasks';
 import { isPreviewExpired, isPreviewModuleTrialExpired, maybeExpirePreviewUser } from '@/lib/preview';
 import { userHasModuleDataAccess } from '@/lib/previewModuleStatus';
-import { verifyInitDataId }     from '@/lib/verifyInitData';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
 
 const redis     = createRedisFromEnv();
@@ -77,18 +76,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'Unknown subject' });
     }
 
-    // 1. Верификация: либо через initData, либо через белый список
-    if (!initData) {
-      // Нет initData (неофициальный клиент) — проверяем белый список
-      const inWL = await redis.sismember('sub_whitelist', String(telegramId));
-      if (!inWL) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-    } else {
-      const userId = verifyInitDataId(String(initData), BOT_TOKEN);
-      if (!userId || String(userId) !== String(telegramId)) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+    // 1. Верификация: initData, веб-сессия или whitelist
+    const { resolveRequestIdentity } = await import('@/lib/resolveIdentity');
+    const identity = await resolveRequestIdentity(redis, req, {
+      telegramId,
+      initData,
+      requireTelegram: true,
+    });
+    if (!identity.ok || identity.tgId !== String(telegramId)) {
+      return res.status(identity.ok ? 401 : identity.status).json({
+        error: identity.ok ? 'Unauthorized' : identity.error,
+        code: identity.ok ? undefined : identity.code,
+      });
     }
 
     // 2. Проверка доступа к дисциплине

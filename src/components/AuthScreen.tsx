@@ -105,28 +105,33 @@ export const AuthScreen = ({ onAuthenticated }: { onAuthenticated: () => void })
     }
   }, [mounted]);
 
-  // Автоматический поиск Telegram ID пользователя
+  // Автоматический поиск Telegram ID пользователя (Mini App или веб-аккаунт)
   useEffect(() => {
-    if (!mounted || autoTgId !== null || idCheckAttempts >= maxAttempts) {
-      if (idCheckAttempts >= maxAttempts) setIdChecked(true); // Если попытки кончились, сдаемся
+    if (!mounted || autoTgId !== null) return;
+
+    const stored = localStorage.getItem('user_tg_id');
+    if (stored) {
+      setAutoTgId(stored);
+      setIdChecked(true);
+      return;
+    }
+
+    if (idCheckAttempts >= maxAttempts) {
+      setIdChecked(true);
       return;
     }
     const timer = setTimeout(() => {
       const tg = (window as any).Telegram?.WebApp;
       if (tg) {
-        // Обновляем initData при каждой попытке — он может появиться позже
         if (tg.initData) setInitData(tg.initData);
-
-        // Пытаемся достать ID из разных мест
         let id = tg.initDataUnsafe?.user?.id;
         if (!id && tg.initData) {
           try { id = JSON.parse(new URLSearchParams(tg.initData).get('user') || '{}').id; } catch {}
         }
         if (id) {
-          setAutoTgId(String(id)); // Успешно нашли!
+          setAutoTgId(String(id));
           setIdChecked(true);
-        }
-        else {
+        } else {
           setIdCheckAttempts(p => p + 1);
         }
       } else {
@@ -160,18 +165,22 @@ export const AuthScreen = ({ onAuthenticated }: { onAuthenticated: () => void })
   // Уже зарегистрированные клиенты — без повторного ввода ключа
   const silentLoginTried = useRef(false);
   useEffect(() => {
-    if (!mounted || !autoTgId || !initData || silentLoginTried.current) return;
+    if (!mounted || !autoTgId || silentLoginTried.current) return;
+    // Mini App: ждём initData. Веб: cookie-сессия достаточна без initData.
+    const viaWeb = localStorage.getItem('auth_via') === 'web';
+    if (!viaWeb && !initData) return;
     silentLoginTried.current = true;
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch('/api/auth', {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             telegramId: String(autoTgId),
             mode: 'check_subjects',
-            initData,
+            initData: initData || '',
           }),
         });
         const data = await res.json();
@@ -220,10 +229,11 @@ export const AuthScreen = ({ onAuthenticated }: { onAuthenticated: () => void })
     try {
       // Отправляем запрос на наш бэкенд
       const res = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: inputKey.trim(), telegramId: String(inputTgId), initData }),
-      });
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: inputKey.trim(), telegramId: String(inputTgId), initData: initData || '' }),
+        });
       const data = await res.json();
       
       if (res.ok) {

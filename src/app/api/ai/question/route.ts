@@ -17,7 +17,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Неверный запрос' }, { status: 400 });
   }
 
-  const auth = await verifyApiStudyUser(body.initData, body.telegramId);
+  const auth = await verifyApiStudyUser(body.initData, body.telegramId, {
+    cookieHeader: req.headers.get('cookie'),
+  });
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }

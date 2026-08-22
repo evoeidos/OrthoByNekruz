@@ -1,6 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
-import { verifyInitDataId } from '@/lib/verifyInitData';
 import { getSubject } from '@/lib/subjects';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
 
@@ -17,9 +16,9 @@ function weakTopicsKey(tgId: string, subjectId: string) {
   return `truefalse_weak:${subjectId}:${tgId}`;
 }
 
-async function authRequest(req: NextApiRequest): Promise<{ tgId: string } | { error: string; status: number }> {
+async function authRequest(req: NextApiRequest): Promise<{ tgId: string } | { error: string; status: number; code?: string }> {
   const { telegramId, initData, subject } = req.body ?? {};
-  if (!BOT_TOKEN || !telegramId || !subject) {
+  if (!telegramId || !subject) {
     return { error: 'Bad request', status: 400 };
   }
 
@@ -28,14 +27,18 @@ async function authRequest(req: NextApiRequest): Promise<{ tgId: string } | { er
     return { error: 'Unknown subject', status: 400 };
   }
 
-  if (!initData) {
-    const inWL = await redis.sismember('sub_whitelist', String(telegramId));
-    if (!inWL) return { error: 'Unauthorized', status: 401 };
-  } else {
-    const userId = verifyInitDataId(String(initData), BOT_TOKEN);
-    if (!userId || String(userId) !== String(telegramId)) {
-      return { error: 'Unauthorized', status: 401 };
-    }
+  const { resolveRequestIdentity } = await import('@/lib/resolveIdentity');
+  const identity = await resolveRequestIdentity(redis, req, {
+    telegramId,
+    initData,
+    requireTelegram: true,
+  });
+  if (!identity.ok || identity.tgId !== String(telegramId)) {
+    return {
+      error: identity.ok ? 'Unauthorized' : identity.error,
+      status: identity.ok ? 401 : identity.status,
+      code: identity.ok ? undefined : identity.code,
+    };
   }
 
   return { tgId: String(telegramId) };

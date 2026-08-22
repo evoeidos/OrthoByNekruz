@@ -469,13 +469,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   let lastName: string | null = null;
   let skipSubscriptionCheck = false;
 
-  if (!initData) {
-    const inWL = await redis.sismember('sub_whitelist', tgIdStr);
-    if (!inWL && !isPreviewShortDurationAccount(tgIdStr)) {
-      return res.status(403).json({ error: 'Открой приложение через бота в Telegram.', noInitData: true });
-    }
-    skipSubscriptionCheck = true;
-  } else {
+  if (initData) {
     const tgUser = verifyInitDataUser(initData, BOT_TOKEN || '');
     if (!tgUser || String(tgUser.id) !== tgIdStr) {
       return res.status(401).json({ error: 'Ошибка верификации данных.' });
@@ -483,6 +477,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     username = tgUser.username || null;
     firstName = tgUser.first_name || null;
     lastName = tgUser.last_name || null;
+  } else {
+    // Веб-сессия (cookie) или whitelist — без Telegram Mini App initData
+    const { resolveRequestIdentity } = await import('@/lib/resolveIdentity');
+    const identity = await resolveRequestIdentity(redis, req, {
+      telegramId: tgIdStr,
+      initData: '',
+      requireTelegram: true,
+    });
+    if (identity.ok && identity.via === 'session' && identity.tgId === tgIdStr) {
+      // ok — вход с сайта после привязки Telegram
+    } else {
+      const inWL = await redis.sismember('sub_whitelist', tgIdStr);
+      if (!inWL && !isPreviewShortDurationAccount(tgIdStr)) {
+        return res.status(403).json({
+          error: 'Открой через бота или войди на сайте и привяжи Telegram.',
+          noInitData: true,
+        });
+      }
+      skipSubscriptionCheck = true;
+    }
   }
 
   const ip = getIp(req);
