@@ -1,10 +1,10 @@
 // pages/api/ping.ts  ← Pages Router формат
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { Redis }            from '@upstash/redis';
+import { createRedisFromEnv } from '@/lib/redis';
 import { verifyInitDataId } from '@/lib/verifyInitData';
 import { touchUserVisit } from '@/lib/userActivity';
 
-const redis            = Redis.fromEnv();
+const redis            = createRedisFromEnv();
 const BOT_TOKEN        = process.env.BOT_TOKEN    || '';
 const ADMIN_TG_ID      = process.env.ADMIN_TG_ID  || '';
 const DAILY_OPEN_LIMIT = 50;

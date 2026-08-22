@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { Redis } from '@upstash/redis';
+import { createRedisFromEnv } from '@/lib/redis';
 import {
   SUBJECTS,
   getSubject,
@@ -71,7 +71,7 @@ import {
 import { touchUserActivity, touchUserVisit } from '@/lib/userActivity';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
 
-const redis = Redis.fromEnv();
+const redis = createRedisFromEnv();
 
 const BOT_TOKEN        = process.env.BOT_TOKEN;
 const CHANNEL_USERNAME = process.env.CHANNEL_USERNAME || 'nzsdental';
@@ -1076,6 +1076,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.error('API Error:', error);
     if (mode === 'check_subjects' && isRedisUnavailableError(error)) {
       return res.status(200).json({ degraded: true, registered: true });
+    }
+    const msg = String(error instanceof Error ? error.message : error);
+    if (msg.includes('Redis env missing')) {
+      return res.status(503).json({
+        error: 'Сервер без Redis: задай KV_REST_API_URL/TOKEN или UPSTASH_REDIS_REST_URL/TOKEN.',
+      });
     }
     return res.status(500).json({ error: 'Ошибка сервера.' });
   }

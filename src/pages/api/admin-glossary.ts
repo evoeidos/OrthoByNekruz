@@ -2,9 +2,9 @@
 // Кастомные записи глоссария хранятся в Redis: glossary_custom:{subjectId} → GlossaryEntry[]
 // При запросе type='glossary' в subject-data.ts эти записи мёржатся с JSON-файлом.
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { Redis } from '@upstash/redis';
+import { createRedisFromEnv } from '@/lib/redis';
 
-const redis        = Redis.fromEnv();
+const redis        = createRedisFromEnv();
 const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 
 export interface GlossaryEntry {

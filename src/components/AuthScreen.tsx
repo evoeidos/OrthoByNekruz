@@ -266,6 +266,10 @@ export const AuthScreen = ({ onAuthenticated }: { onAuthenticated: () => void })
           setError(true);
           setErrorMessage(data.error || 'Доступ запрещён');
           setTimeout(() => setErrorMessage(''), 5000);
+        } else if (res.status >= 500) {
+          setError(true);
+          setErrorMessage(data.error || 'Ошибка сервера.');
+          setTimeout(() => setErrorMessage(''), 6000);
         } else {
           // Неверный ключ. Блокируем ввод на 60 секунд (Защита от подбора)
           const LOCKOUT_SEC = 60;

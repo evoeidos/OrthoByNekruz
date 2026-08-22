@@ -1,10 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { Redis } from '@upstash/redis';
+import { createRedisFromEnv } from '@/lib/redis';
 import { verifyInitDataId } from '@/lib/verifyInitData';
 import { getSubject } from '@/lib/subjects';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
 
-const redis     = Redis.fromEnv();
+const redis     = createRedisFromEnv();
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
 
 const WEAK_THRESHOLD = 60;

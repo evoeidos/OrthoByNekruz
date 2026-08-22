@@ -1,9 +1,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { Redis } from '@upstash/redis';
+import { createRedisFromEnv } from '@/lib/redis';
 import { verifyInitDataUser } from '@/lib/verifyInitData';
 import { getFacultyStudentStats } from '@/lib/facultyStats';
 
-const redis        = Redis.fromEnv();
+const redis        = createRedisFromEnv();
 const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 const ADMIN_TG_ID  = process.env.ADMIN_TG_ID || '978243325';
 const BOT_TOKEN    = process.env.BOT_TOKEN    || '';

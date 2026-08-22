@@ -3,10 +3,10 @@
 // Данные хранятся в Redis: relatedTerms:{subjectId}:{type} → Record<itemId, string[]>
 // subject-data.ts мёржит эти оверрайды при отдаче данных студентам.
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { Redis } from '@upstash/redis';
+import { createRedisFromEnv } from '@/lib/redis';
 import { getSubject, getAllDataFileNames } from '@/lib/subjects';
 
-const redis        = Redis.fromEnv();
+const redis        = createRedisFromEnv();
 const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 
 type SectionType = 'questions' | 'tests' | 'tasks';

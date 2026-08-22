@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { Redis } from '@upstash/redis';
+import { createRedisFromEnv } from '@/lib/redis';
 import { SUBJECTS } from '@/lib/subjects';
 import { verifyInitDataUser } from '@/lib/verifyInitData';
 import { getAllUserIds, registerUserId } from '@/lib/userIndex';
@@ -18,7 +18,7 @@ import {
 } from '@/lib/groupAccess';
 import { buildSubjectCatalog } from '@/lib/subjectCatalog';
 
-const redis = Redis.fromEnv();
+const redis = createRedisFromEnv();
 const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 const ADMIN_TG_ID = process.env.ADMIN_TG_ID || '978243325';
 const BOT_TOKEN = process.env.BOT_TOKEN || '';

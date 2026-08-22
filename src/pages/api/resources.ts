@@ -1,8 +1,8 @@
 // pages/api/resources.ts  — публичный эндпоинт, без авторизации
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { Redis } from '@upstash/redis';
+import { createRedisFromEnv } from '@/lib/redis';
 
-const redis = Redis.fromEnv();
+const redis = createRedisFromEnv();
 
 export interface Resource {
   id:          string;

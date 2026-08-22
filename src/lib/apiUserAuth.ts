@@ -1,9 +1,9 @@
-import { Redis } from '@upstash/redis';
+import { createRedisFromEnv } from '@/lib/redis';
 import { verifyInitDataId } from '@/lib/verifyInitData';
 import { getUserAvailableSubjects } from '@/lib/subjects';
 import { hasFinalizedPreviewAccess, isPreviewFlowInProgress } from '@/lib/previewStateMachine';
 
-const redis = Redis.fromEnv();
+const redis = createRedisFromEnv();
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
 
 export type ApiUserAuthResult =

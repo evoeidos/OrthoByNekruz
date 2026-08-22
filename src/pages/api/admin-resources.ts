@@ -1,9 +1,9 @@
 // pages/api/admin-resources.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { Redis } from '@upstash/redis';
+import { createRedisFromEnv } from '@/lib/redis';
 import type { Resource } from './resources';
 
-const redis        = Redis.fromEnv();
+const redis        = createRedisFromEnv();
 const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
