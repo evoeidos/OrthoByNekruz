@@ -78,7 +78,7 @@ export const PreviewPaymentTabPanel: React.FC<PreviewPaymentTabPanelProps> = ({
 
   const grantedSet = useMemo(() => new Set(grantedModules), [grantedModules]);
 
-  /** Разделы с истёкшей пробой — в оплату по умолчанию. */
+  /** Разделы с истёкшей пробой. */
   const dueModules = useMemo(() => (
     PAYMENT_MODULE_ROW_ORDER.filter(m => {
       if (!chosenModules.includes(m) || grantedSet.has(m)) return false;
@@ -109,16 +109,26 @@ export const PreviewPaymentTabPanel: React.FC<PreviewPaymentTabPanelProps> = ({
     })
   ), [chosenModules, grantedSet, moduleStatuses, rowOptions]);
 
+  const stillInTrial = useMemo(
+    () => chosenModules.filter(m => {
+      if (grantedSet.has(m)) return false;
+      const st = moduleStatuses[m];
+      return st === 'trial' || !st;
+    }),
+    [chosenModules, grantedSet, moduleStatuses],
+  );
+
   const isPharma = subjectId === 'pharma';
 
+  /** По умолчанию — все разделы из пробы (полная сумма сразу), без «добавить». */
   const defaultPaymentSelection = useMemo(() => {
     const saved = normalizePreviewModules(paymentSelection).filter(m => toggleableModules.includes(m));
     if (saved.length > 0) return saved;
-    if (isPharma && toggleableModules.length > 0) return toggleableModules;
-    if (dueModules.length > 0) return dueModules;
+    const fromPreview = toggleableModules.filter(m => chosenModules.includes(m));
+    if (fromPreview.length > 0) return fromPreview;
     if (toggleableModules.includes(module)) return [module];
-    return toggleableModules.slice(0, 1);
-  }, [paymentSelection, dueModules, module, toggleableModules, isPharma]);
+    return dueModules.slice(0, 1);
+  }, [paymentSelection, dueModules, module, toggleableModules, chosenModules]);
 
   const selectionKey = [
     defaultPaymentSelection.join('|'),
@@ -146,8 +156,6 @@ export const PreviewPaymentTabPanel: React.FC<PreviewPaymentTabPanelProps> = ({
     return 'trial';
   }, [grantedSet, moduleStatuses]);
 
-  const isBio = subjectId === 'bio';
-
   const bioHadTest = useMemo(
     () => bioUserHadTest([...new Set([...selected, ...grantedModules])], grantedModules),
     [selected, grantedModules],
@@ -167,7 +175,6 @@ export const PreviewPaymentTabPanel: React.FC<PreviewPaymentTabPanelProps> = ({
     const opt = rowOptions.find(o => o.id === id);
     if (opt?.alreadyOwned || modulesUpdating || checking) return;
     if (!toggleableModules.includes(id)) return;
-    if (!isBio && !isPharma && opt && !opt.selectable) return;
 
     const next = selected.includes(id)
       ? selected.filter(m => m !== id)
@@ -177,8 +184,7 @@ export const PreviewPaymentTabPanel: React.FC<PreviewPaymentTabPanelProps> = ({
 
     persistSelection(ordered);
   }, [
-    rowOptions, selected, modulesUpdating, checking, persistSelection,
-    toggleableModules, isBio, isPharma,
+    rowOptions, selected, modulesUpdating, checking, persistSelection, toggleableModules,
   ]);
 
   const copyCard = useCallback(async () => {
@@ -237,15 +243,17 @@ export const PreviewPaymentTabPanel: React.FC<PreviewPaymentTabPanelProps> = ({
     >
       <div className="flex flex-col items-center p-6 pt-8">
         <div className="max-w-sm w-full text-center space-y-5">
-        <div className="text-4xl">{status === 'rejected' ? '↩️' : '⏳'}</div>
+        <div className="text-4xl">{status === 'rejected' ? '↩️' : '💳'}</div>
         <div className="space-y-2 px-1">
           <h2 className="text-lg font-bold leading-snug" style={{ color: 'var(--c-text)' }}>
-            Ты уже знаешь что внутри.
+            {status === 'rejected' ? 'Оплата не подтверждена' : 'Выбери разделы и оплати'}
           </h2>
           <p className="text-sm leading-relaxed" style={{ color: 'var(--c-muted)' }}>
             {status === 'rejected'
-              ? 'Оплата не подтверждена — нужен новый перевод.'
-              : 'Плата не за доступ — за то, чтобы не потерять то, что уже нашёл.'}
+              ? 'Нужен новый перевод — отметь разделы, которые хочешь открыть.'
+              : stillInTrial.length > 0
+                ? 'Не обязательно ждать конца пробы остальных разделов. Отметь что нужно — сумма ниже, после «войти» откроются выбранные.'
+                : 'Отметь разделы, переведи сумму и нажми «войти» — откроем именно то, что выбрано.'}
           </p>
         </div>
 
@@ -297,24 +305,26 @@ export const PreviewPaymentTabPanel: React.FC<PreviewPaymentTabPanelProps> = ({
             const phase = modulePhase(opt.id);
             const on = selected.includes(opt.id);
             const isTrial = phase === 'trial' && chosenModules.includes(opt.id);
+            const isDue = phase === 'due';
             const isAdditional = additionalModules.includes(opt.id);
             const isLastSelected = on && selected.length <= 1;
+            const canToggle = toggleableModules.includes(opt.id);
             const disabled = opt.alreadyOwned || modulesUpdating || checking
               || isLastSelected
-              || (!toggleableModules.includes(opt.id))
-              || (!isBio && !isPharma && phase === 'due' && !opt.selectable);
+              || !canToggle;
+            const unit = opt.unitPriceRub;
             return (
               <button
                 key={opt.id}
                 type="button"
                 disabled={disabled}
                 onClick={() => toggleModule(opt.id)}
-                className="flex-1 min-w-0 min-h-[44px] rounded-xl text-[11px] font-bold leading-tight px-1 py-1 transition-all active:scale-[0.98] disabled:opacity-40 flex flex-col items-center justify-center gap-0.5"
+                className="flex-1 min-w-0 min-h-[52px] rounded-xl text-[11px] font-bold leading-tight px-1 py-1.5 transition-all active:scale-[0.98] disabled:opacity-40 flex flex-col items-center justify-center gap-0.5"
                 style={{
                   background: on
                     ? `color-mix(in srgb, ${accent} 18%, var(--c-card))`
                     : 'var(--c-card)',
-                  border: `1.5px solid ${on ? accent : phase === 'due' ? accent : 'var(--c-border)'}`,
+                  border: `1.5px solid ${on ? accent : isDue ? accent : 'var(--c-border)'}`,
                   color: on ? accent : 'var(--c-muted)',
                 }}
               >
@@ -323,9 +333,24 @@ export const PreviewPaymentTabPanel: React.FC<PreviewPaymentTabPanelProps> = ({
                 ) : (
                   <>
                     <span>{MODULE_ROW_LABELS[opt.id]}</span>
-                    {isTrial && (
+                    {unit != null && (
+                      <span className="text-[10px] font-semibold tabular-nums opacity-90">
+                        {formatPriceRub(unit)}
+                      </span>
+                    )}
+                    {isPharma && !opt.alreadyOwned && (
                       <span className="text-[8px] font-semibold uppercase tracking-wide opacity-70">
-                        проба
+                        в комплекте
+                      </span>
+                    )}
+                    {isTrial && !isPharma && (
+                      <span className="text-[8px] font-semibold uppercase tracking-wide opacity-70">
+                        ещё проба
+                      </span>
+                    )}
+                    {isDue && !isPharma && (
+                      <span className="text-[8px] font-semibold uppercase tracking-wide opacity-70">
+                        проба кончилась
                       </span>
                     )}
                     {isAdditional && (
@@ -359,6 +384,9 @@ export const PreviewPaymentTabPanel: React.FC<PreviewPaymentTabPanelProps> = ({
             className="rounded-2xl px-4 py-4"
             style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}
           >
+            <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--c-muted)' }}>
+              К оплате за выбранное
+            </p>
             <div className="flex items-center justify-center gap-2">
               <p className="text-3xl font-bold tabular-nums" style={{ color: accent }}>
                 {formatPriceRub(priceSummary.total)}
@@ -372,6 +400,9 @@ export const PreviewPaymentTabPanel: React.FC<PreviewPaymentTabPanelProps> = ({
               {priceSummary.lines.length > 0
                 ? `${subjectCfg ? ' · ' : ''}${priceSummary.lines.join(' · ')}`
                 : ''}
+            </p>
+            <p className="text-[11px] mt-2 leading-snug" style={{ color: 'var(--c-muted)' }}>
+              После «войти» откроются только отмеченные разделы.
             </p>
           </div>
         )}

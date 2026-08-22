@@ -1398,9 +1398,18 @@ export function claimPreviewReceipt(user: any, modulesToClaim?: PreviewModule[])
       : {}),
   };
   const trustDeadline = new Date(Date.now() + PREVIEW_RECEIPT_TRUST_MS).toISOString();
+  const payableSet = new Set(payable);
   for (const m of payable) {
     statuses[m] = 'receipt_pending';
     trustExpires[m] = trustDeadline;
+  }
+  // Невыбранные разделы больше не «висят» в пробе — сразу экран оплаты.
+  for (const m of allChosen) {
+    if (payableSet.has(m)) continue;
+    if (statuses[m] === 'confirmed' || statuses[m] === 'receipt_pending') continue;
+    if (statuses[m] === 'trial' || !statuses[m]) {
+      statuses[m] = 'awaiting_payment';
+    }
   }
 
   const subjects = user.subjects && typeof user.subjects === 'object'
@@ -1421,11 +1430,14 @@ export function claimPreviewReceipt(user: any, modulesToClaim?: PreviewModule[])
     receiptClaimedAt:           user.receiptClaimedAt ?? new Date().toISOString(),
     previewModuleStatuses:      statuses,
     previewModuleTrustExpiresAt: trustExpires,
-    previewPaymentSelection:    undefined,
+    previewPaymentSelection:    payable,
+    previewQuotedPrice:         calcPreviewPriceRub(chosen, payable, {
+      bioHadTest: chosen === 'bio'
+        ? bioUserHadTest([...new Set([...allChosen, ...payable])], getGrantedModulesForPaymentSubject(user, chosen))
+        : undefined,
+    }),
     navHidden,
-    previewStatus:              allChosen.some((m: PreviewModule) => statuses[m] === 'trial')
-      ? ('active' as PreviewStatus)
-      : (user.previewStatus === 'active' ? 'expired' as PreviewStatus : user.previewStatus),
+    previewStatus: 'expired' as PreviewStatus,
   };
 }
 
