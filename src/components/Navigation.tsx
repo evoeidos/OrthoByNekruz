@@ -1,10 +1,13 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { BookOpen, ClipboardList, PenTool, BarChart3, Layers, Scale } from 'lucide-react';
+import { BookOpen, ClipboardList, PenTool, BarChart3, Layers, Scale, CalendarDays } from 'lucide-react';
 import { subjectHasQuestionGameModes } from '@/lib/subjects';
 
-export type TabType = 'questions' | 'tests' | 'tasks' | 'stats';
+export type TabType = 'questions' | 'tests' | 'tasks' | 'schedule' | 'stats';
+
+/** Порядок вкладок — используется и для выбора запасной вкладки, когда активная скрыта. */
+export const TAB_ORDER: TabType[] = ['questions', 'tests', 'tasks', 'schedule', 'stats'];
 
 export type BioGameMode = 'list' | 'flashcards' | 'true_false';
 
@@ -26,6 +29,7 @@ const ALL_TABS: { id: TabType; label: string; Icon: React.ComponentType<{ classN
   { id: 'questions', label: 'Вопросы',    Icon: BookOpen      },
   { id: 'tests',     label: 'Тесты',      Icon: ClipboardList },
   { id: 'tasks',     label: 'Задачи',     Icon: PenTool       },
+  { id: 'schedule',  label: 'Занятия',    Icon: CalendarDays  },
   { id: 'stats',     label: 'Статистика', Icon: BarChart3     },
 ];
 

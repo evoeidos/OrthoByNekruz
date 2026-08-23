@@ -11,10 +11,11 @@ import { ChannelCodeEntryScreen } from '@/components/ChannelCodeEntryScreen';
 import { AccessWelcomeOverlay, PREVIEW_AWAITING_CONFIRM_KEY, PREVIEW_WELCOME_SEEN_KEY } from '@/components/AccessWelcomeOverlay';
 import { GroupAccessHintModal } from '@/components/GroupAccessHintModal';
 import { AuthGate }     from '@/components/AuthGate';
-import { Navigation, TabType, type BioGameMode } from '@/components/Navigation';
+import { Navigation, TabType, TAB_ORDER, type BioGameMode } from '@/components/Navigation';
 import { QuestionsTab }  from '@/components/QuestionsTab';
 import { TestsTab }      from '@/components/TestsTab';
 import { TasksTab }      from '@/components/TasksTab';
+import { ScheduleTab }   from '@/components/ScheduleTab';
 import { StatsTab }      from '@/components/StatsTab';
 import { Loader2 }       from 'lucide-react';
 import { useToast }      from '@/hooks/use-toast';
@@ -211,6 +212,8 @@ export default function Home() {
   const [groupGrantedSubjects, setGroupGrantedSubjects] = useState<string[]>([]);
   const [groupOnlyAccess, setGroupOnlyAccess] = useState(false);
   const [accessChecked,   setAccessChecked]   = useState<boolean>(false);
+  /** «Занятия» открыты и без купленных предметов — бесплатный вход для всего вуза. */
+  const [scheduleOnly,    setScheduleOnly]    = useState<boolean>(false);
   const [previewModuleStatuses, setPreviewModuleStatuses] = useState<PreviewModuleStatusMap>({});
   const [previewRemainingMinByModule, setPreviewRemainingMinByModule] = useState<PreviewActiveMsMap>({});
   const [previewRemainingMsByModule, setPreviewRemainingMsByModule] = useState<PreviewActiveMsMap>({});
@@ -1379,8 +1382,9 @@ export default function Home() {
         localStorage.setItem('last_subject', target);
         localStorage.setItem('subject_chosen', 'true');
         const hidden = (data.navHidden as Record<string, string[]> | undefined)?.[target] || [];
-        const tabOrder: TabType[] = ['questions', 'tests', 'tasks', 'stats'];
-        const firstOpen = tabOrder.find(t => t === 'stats' || !hidden.includes(t));
+        const firstOpen = TAB_ORDER.find(
+          t => t === 'stats' || t === 'schedule' || !hidden.includes(t),
+        );
         if (firstOpen) setActiveTab(firstOpen);
       }
       return true;
@@ -1551,8 +1555,7 @@ export default function Home() {
   useEffect(() => {
     const hidden = navigationHiddenTabs;
     if (!hidden.includes(activeTab)) return;
-    const order: TabType[] = ['questions', 'tests', 'tasks', 'stats'];
-    const next = order.find(t => !hidden.includes(t));
+    const next = TAB_ORDER.find(t => !hidden.includes(t));
     if (next) setActiveTab(next);
   }, [subject, navigationHiddenTabs, activeTab]);
 
@@ -1726,6 +1729,18 @@ export default function Home() {
     }
   }, [toast]);
 
+  /** Из «Занятий» — прямо к вопросам предмета, который стоит в расписании. */
+  const handleOpenSubjectFromSchedule = useCallback((subjectId: string) => {
+    if (!availableSubjects.includes(subjectId)) return;
+    setSubject(subjectId);
+    localStorage.setItem('subject_chosen', 'true');
+    const hidden = new Set(navHidden[subjectId] || []);
+    const firstOpen = TAB_ORDER.find(
+      t => t !== 'schedule' && t !== 'stats' && !hidden.has(t),
+    );
+    setActiveTab(firstOpen ?? 'stats');
+  }, [availableSubjects, navHidden, setSubject]);
+
   const withAccessWelcome = (node: React.ReactNode) => (
     <>
       {showAccessWelcome && <AccessWelcomeOverlay onContinue={dismissAccessWelcome} />}
@@ -1825,6 +1840,29 @@ export default function Home() {
     && !previewConfirmedAt
     && !inPendingPaymentFlow
   ) {
+    if (scheduleOnly) {
+      return withAccessWelcome(
+        <main className="flex flex-col h-[100dvh] w-full relative overflow-hidden">
+          <div className="flex-1 overflow-hidden relative">
+            <ScheduleTab availableSubjects={[]} onSecretTap={handleSecretTap} />
+          </div>
+          <div
+            className="flex-shrink-0 px-4 pt-2"
+            style={{ paddingBottom: 'calc(var(--nav-bottom, 12px) + 12px)' }}
+          >
+            <button
+              type="button"
+              onClick={() => setScheduleOnly(false)}
+              className="w-full h-12 rounded-2xl text-sm font-semibold"
+              style={{ background: 'var(--c-card)', color: 'var(--c-text)', border: '1px solid var(--c-border)' }}
+            >
+              К доступу в приложение
+            </button>
+          </div>
+        </main>,
+      );
+    }
+
     return withAccessWelcome(
       <div className="flex items-center justify-center min-h-screen bg-background p-6">
         <div className="max-w-sm text-center space-y-4">
@@ -1837,9 +1875,17 @@ export default function Home() {
           </p>
           <button
             type="button"
-            onClick={() => refreshAccess()}
+            onClick={() => setScheduleOnly(true)}
             className="w-full h-12 rounded-2xl text-sm font-semibold"
             style={{ background: 'var(--c-primary)', color: 'var(--c-bg)' }}
+          >
+            Открыть расписание группы
+          </button>
+          <button
+            type="button"
+            onClick={() => refreshAccess()}
+            className="w-full h-12 rounded-2xl text-sm font-semibold"
+            style={{ background: 'var(--c-card)', color: 'var(--c-text)', border: '1px solid var(--c-border)' }}
           >
             Обновить
           </button>
@@ -1916,6 +1962,13 @@ export default function Home() {
         {activeTab === 'tasks'     && renderModuleTab('tasks', (
           <TasksTab subject={subject} onSecretTap={handleSecretTap} bustDataCache={paymentFlowCacheBust} />
         ))}
+        {activeTab === 'schedule'  && (
+          <ScheduleTab
+            availableSubjects={availableSubjects}
+            onOpenSubject={handleOpenSubjectFromSchedule}
+            onSecretTap={handleSecretTap}
+          />
+        )}
         {activeTab === 'stats'     && (
           <StatsTab
             subject={subject}
