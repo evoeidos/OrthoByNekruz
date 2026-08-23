@@ -58,6 +58,10 @@ export class NativeRedisClient {
     return this.client.exists(key);
   }
 
+  async ttl(key: string): Promise<number> {
+    return this.client.ttl(key);
+  }
+
   async sadd(key: string, ...members: (string | number)[]): Promise<number> {
     return this.client.sadd(key, ...members.map(String));
   }

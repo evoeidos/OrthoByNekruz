@@ -1,4 +1,4 @@
-import type { Redis } from '@upstash/redis';
+import type { AppRedis } from '@/lib/redis';
 
 type RedisScanDel = {
   scan: (cursor: number, opts: { match: string; count: number }) => Promise<[number | string, string[]]>;
@@ -43,7 +43,7 @@ export type CatalogRateResult = { blocked: boolean };
 
 /** Лимит просмотра каталога из приложения (отдельно от входа по ключу). */
 export async function checkCatalogBrowseLimit(
-  redis: Redis,
+  redis: AppRedis,
   ip: string,
   tgId: string,
   outcome: 'success' | 'fail',

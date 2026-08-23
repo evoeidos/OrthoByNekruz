@@ -1,17 +1,17 @@
-import type { Redis } from '@upstash/redis';
+import type { AppRedis } from '@/lib/redis';
 
 export const ALL_USER_IDS_KEY = 'all_user_ids';
 
-export async function registerUserId(redis: Redis, tgId: string): Promise<void> {
+export async function registerUserId(redis: AppRedis, tgId: string): Promise<void> {
   await redis.sadd(ALL_USER_IDS_KEY, String(tgId));
 }
 
-export async function removeUserId(redis: Redis, tgId: string): Promise<void> {
+export async function removeUserId(redis: AppRedis, tgId: string): Promise<void> {
   await redis.srem(ALL_USER_IDS_KEY, String(tgId));
 }
 
 /** Список ID пользователей. При пустом индексе — одноразовая миграция из user_id:* */
-export async function getAllUserIds(redis: Redis): Promise<string[]> {
+export async function getAllUserIds(redis: AppRedis): Promise<string[]> {
   const fromSet = await redis.smembers(ALL_USER_IDS_KEY);
   if (fromSet && fromSet.length > 0) {
     return fromSet.map(String);

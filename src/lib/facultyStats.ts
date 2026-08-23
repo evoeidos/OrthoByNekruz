@@ -1,4 +1,4 @@
-import type { Redis } from '@upstash/redis';
+import type { AppRedis } from '@/lib/redis';
 import { getAllUserIds } from '@/lib/userIndex';
 import { resolveUserFacultyPromo } from '@/lib/facultyCodes';
 
@@ -29,7 +29,7 @@ function emptyStats(): FacultyStudentStats {
   };
 }
 
-export async function computeFacultyStudentStats(redis: Redis): Promise<FacultyStudentStats> {
+export async function computeFacultyStudentStats(redis: AppRedis): Promise<FacultyStudentStats> {
   const ids = await getAllUserIds(redis);
   const stats = emptyStats();
   stats.total = ids.length;
@@ -61,7 +61,7 @@ export async function computeFacultyStudentStats(redis: Redis): Promise<FacultyS
 }
 
 export async function getFacultyStudentStats(
-  redis: Redis,
+  redis: AppRedis,
   options?: { force?: boolean },
 ): Promise<FacultyStudentStats> {
   if (!options?.force) {
