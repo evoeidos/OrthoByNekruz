@@ -1,7 +1,7 @@
 /**
  * Бесплатный доступ по факультету + группе (правила в Redis, админка).
  */
-import { Redis } from '@upstash/redis';
+import type { AppRedis } from '@/lib/redis';
 import { SUBJECTS, getSubject, createDefaultSubjects, migrateUserSubjects, getUserAvailableSubjects } from '@/lib/subjects';
 import {
   buildNavHiddenForConfirmedPurchase,
@@ -108,13 +108,13 @@ export function isRuleCurrentlyActive(rule: GroupAccessRule, nowMs = Date.now())
   return true;
 }
 
-export async function loadGroupAccessRules(redis: Redis): Promise<GroupAccessRule[]> {
+export async function loadGroupAccessRules(redis: AppRedis): Promise<GroupAccessRule[]> {
   const raw = await redis.get(GROUP_ACCESS_RULES_KEY);
   if (!Array.isArray(raw)) return [];
   return raw.filter(isGroupAccessRule);
 }
 
-export async function saveGroupAccessRules(redis: Redis, rules: GroupAccessRule[]): Promise<void> {
+export async function saveGroupAccessRules(redis: AppRedis, rules: GroupAccessRule[]): Promise<void> {
   await redis.set(GROUP_ACCESS_RULES_KEY, rules);
 }
 

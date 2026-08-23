@@ -1,4 +1,4 @@
-import type { Redis } from '@upstash/redis';
+import type { AppRedis } from '@/lib/redis';
 import type { NextApiRequest } from 'next';
 import { verifyInitDataId } from '@/lib/verifyInitData';
 import {
@@ -25,7 +25,7 @@ export type ResolveIdentityOpts = {
 };
 
 async function resolveWithSession(
-  redis: Redis,
+  redis: AppRedis,
   session: SessionPayload | null,
   bodyTg: string,
   requireTelegram: boolean,
@@ -62,7 +62,7 @@ async function resolveWithSession(
  * req может быть null, если передаёте cookieHeader (App Router).
  */
 export async function resolveRequestIdentity(
-  redis: Redis,
+  redis: AppRedis,
   req: NextApiRequest | null,
   opts: ResolveIdentityOpts = {},
 ): Promise<ResolvedIdentity> {

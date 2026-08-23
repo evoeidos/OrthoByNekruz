@@ -1,5 +1,5 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
-import type { Redis } from '@upstash/redis';
+import type { AppRedis } from '@/lib/redis';
 
 export type WebAccount = {
   id: string;
@@ -60,7 +60,7 @@ export function hashResetToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-export async function getAccountById(redis: Redis, id: string): Promise<WebAccount | null> {
+export async function getAccountById(redis: AppRedis, id: string): Promise<WebAccount | null> {
   const raw = await redis.get<WebAccount | string>(accountKey(id));
   if (!raw) return null;
   if (typeof raw === 'string') {
@@ -69,19 +69,19 @@ export async function getAccountById(redis: Redis, id: string): Promise<WebAccou
   return raw;
 }
 
-export async function getAccountByEmail(redis: Redis, email: string): Promise<WebAccount | null> {
+export async function getAccountByEmail(redis: AppRedis, email: string): Promise<WebAccount | null> {
   const id = await redis.get<string>(emailKey(email));
   if (!id) return null;
   return getAccountById(redis, String(id));
 }
 
-export async function getAccountByTelegramId(redis: Redis, tgId: string): Promise<WebAccount | null> {
+export async function getAccountByTelegramId(redis: AppRedis, tgId: string): Promise<WebAccount | null> {
   const id = await redis.get<string>(tgKey(tgId));
   if (!id) return null;
   return getAccountById(redis, String(id));
 }
 
-export async function saveAccount(redis: Redis, account: WebAccount): Promise<void> {
+export async function saveAccount(redis: AppRedis, account: WebAccount): Promise<void> {
   await redis.set(accountKey(account.id), account);
   await redis.set(emailKey(account.email), account.id);
   if (account.telegramId) {
@@ -90,7 +90,7 @@ export async function saveAccount(redis: Redis, account: WebAccount): Promise<vo
 }
 
 export async function createAccount(
-  redis: Redis,
+  redis: AppRedis,
   email: string,
   password: string,
 ): Promise<WebAccount> {
@@ -113,14 +113,14 @@ export async function createAccount(
   return account;
 }
 
-export async function rotateSession(redis: Redis, account: WebAccount): Promise<WebAccount> {
+export async function rotateSession(redis: AppRedis, account: WebAccount): Promise<WebAccount> {
   const updated = { ...account, sessionId: newSessionId() };
   await saveAccount(redis, updated);
   return updated;
 }
 
 export async function linkTelegramToAccount(
-  redis: Redis,
+  redis: AppRedis,
   account: WebAccount,
   telegramId: string,
 ): Promise<WebAccount> {

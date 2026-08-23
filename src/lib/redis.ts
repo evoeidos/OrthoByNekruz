@@ -1,11 +1,34 @@
 import { Redis } from '@upstash/redis';
+import { createNativeRedisFromEnv, type NativeRedisClient } from '@/lib/nativeRedis';
+
+export type AppRedis = Redis | NativeRedisClient;
+
+function hasNativeRedisEnv(): boolean {
+  return !!(process.env.REDIS_URL?.trim() || process.env.REDIS_HOST?.trim());
+}
+
+function hasUpstashRestEnv(): boolean {
+  const url =
+    process.env.UPSTASH_REDIS_REST_URL
+    || process.env.KV_REST_API_URL
+    || '';
+  const token =
+    process.env.UPSTASH_REDIS_REST_TOKEN
+    || process.env.KV_REST_API_TOKEN
+    || '';
+  return !!(url && token);
+}
 
 /**
- * Upstash / Vercel KV: на Vercel часто KV_REST_API_*,
- * Redis.fromEnv() ждёт UPSTASH_REDIS_REST_*.
- * На Timeweb нужны оба варианта, иначе /api/auth падает с 500.
+ * Timeweb / обычный Redis: REDIS_URL или REDIS_HOST+REDIS_PASSWORD.
+ * Upstash / Vercel KV: UPSTASH_REDIS_REST_* или KV_REST_API_*.
+ * Нативный Redis предпочтительнее, если задан оба варианта.
  */
-export function createRedisFromEnv(): Redis {
+export function createRedisFromEnv(): AppRedis {
+  if (hasNativeRedisEnv()) {
+    return createNativeRedisFromEnv();
+  }
+
   const url =
     process.env.UPSTASH_REDIS_REST_URL
     || process.env.KV_REST_API_URL
@@ -17,7 +40,8 @@ export function createRedisFromEnv(): Redis {
 
   if (!url || !token) {
     throw new Error(
-      'Redis env missing: set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN '
+      'Redis env missing: set REDIS_URL (or REDIS_HOST + REDIS_PASSWORD), '
+      + 'or UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN '
       + '(or KV_REST_API_URL + KV_REST_API_TOKEN)',
     );
   }
@@ -25,10 +49,6 @@ export function createRedisFromEnv(): Redis {
   return new Redis({
     url,
     token,
-    // Auto-pipelining ломается с непонятной ошибкой ("res.map is not a
-    // function"), если Upstash вернул объект с ошибкой вместо массива
-    // (например при рейт-лимите базы). Без него ошибки Upstash приходят
-    // как читаемый UpstashError, который отлавливает isRedisUnavailableError().
     enableAutoPipelining: false,
   });
 }
