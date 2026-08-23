@@ -5,7 +5,10 @@ export function isRedisUnavailableError(err: unknown): boolean {
     msg.includes('max daily request limit')
     || msg.includes('max request limit')
     || msg.includes('rate limit')
+    || msg.includes('rate-limited')
+    || msg.includes('rate limited')
     || msg.includes('quota')
     || msg.includes('limit exceeded')
+    || msg.includes('temporarily rate')
   );
 }

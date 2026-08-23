@@ -22,5 +22,13 @@ export function createRedisFromEnv(): Redis {
     );
   }
 
-  return new Redis({ url, token });
+  return new Redis({
+    url,
+    token,
+    // Auto-pipelining ломается с непонятной ошибкой ("res.map is not a
+    // function"), если Upstash вернул объект с ошибкой вместо массива
+    // (например при рейт-лимите базы). Без него ошибки Upstash приходят
+    // как читаемый UpstashError, который отлавливает isRedisUnavailableError().
+    enableAutoPipelining: false,
+  });
 }
