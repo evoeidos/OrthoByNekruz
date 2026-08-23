@@ -5,3 +5,11 @@ node_modules
 .env*.local
 .claude/
 tsconfig.tsbuildinfo
+
+# Черновики разбора документов: дампы текста PDF, развороты страниц в PNG,
+# промежуточные отчёты сверки. Нужны только во время работы над данными.
+scripts/_*
+scripts/__pycache__/
+build_out.txt
+pdf_bio_answers.json
+pdf_mismatches.json
