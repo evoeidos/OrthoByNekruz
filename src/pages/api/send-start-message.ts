@@ -24,7 +24,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               {
                 text: '💎 Открыть ByNekruz',
                 web_app: {
-                  url: 'https://nekruz2000n-eng-orthobynekruz-91ba.twc1.net/'
+                  url: 'https://nekruz2000n-eng-orthobynekruz-a9a4.twc1.net/'
                 }
               }
             ]

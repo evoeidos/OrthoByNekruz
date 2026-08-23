@@ -4,7 +4,7 @@ import type { PreviewModule } from '@/lib/previewModules';
 
 const BOT_TOKEN   = process.env.BOT_TOKEN   || '';
 const ADMIN_TG_ID = process.env.ADMIN_TG_ID || '';
-const ADMIN_URL   = process.env.ADMIN_URL   || 'https://nekruz2000n-eng-orthobynekruz-91ba.twc1.net/admin';
+const ADMIN_URL   = process.env.ADMIN_URL   || 'https://nekruz2000n-eng-orthobynekruz-a9a4.twc1.net/admin';
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

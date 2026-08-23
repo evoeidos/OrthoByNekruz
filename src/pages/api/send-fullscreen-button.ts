@@ -19,7 +19,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           inline_keyboard: [[{
             text: '📚 Открыть приложение (с плашкой)',
             web_app: {
-              url: 'https://nekruz2000n-eng-orthobynekruz-91ba.twc1.net/'
+              url: 'https://nekruz2000n-eng-orthobynekruz-a9a4.twc1.net/'
               // fullscreen убрали – inline-кнопка не умеет fullscreen
             }
           }]]

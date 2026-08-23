@@ -15,7 +15,26 @@ export async function webAuth(mode: string, body: Record<string, unknown> = {}) 
 export function isInsideTelegramWebApp(): boolean {
   if (typeof window === 'undefined') return false;
   const tg = (window as any).Telegram?.WebApp;
-  return !!(tg?.initData || tg?.initDataUnsafe?.user?.id);
+  if (tg?.initData || tg?.initDataUnsafe?.user?.id) return true;
+  // Запасной признак: Telegram кладёт данные запуска в URL hash.
+  try {
+    const hash = window.location.hash || '';
+    if (hash.includes('tgWebAppData') || hash.includes('tgWebAppVersion')) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/** Ждём готовности Telegram WebApp SDK (скрипт может инициализироваться не сразу). */
+export async function waitForTelegramWebApp(timeoutMs = 1500): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (isInsideTelegramWebApp()) return true;
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  return isInsideTelegramWebApp();
 }
 
 export function applyWebAccountLocal(account: {

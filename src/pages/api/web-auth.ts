@@ -28,7 +28,7 @@ import { isRedisUnavailableError } from '@/lib/redisDegraded';
 
 const redis = createRedisFromEnv();
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
-const APP_URL = (process.env.APP_URL || 'https://nekruz2000n-eng-orthobynekruz-91ba.twc1.net').replace(/\/$/, '');
+const APP_URL = (process.env.APP_URL || 'https://nekruz2000n-eng-orthobynekruz-a9a4.twc1.net').replace(/\/$/, '');
 
 function publicOk(account: WebAccount, extra: Record<string, unknown> = {}) {
   return {

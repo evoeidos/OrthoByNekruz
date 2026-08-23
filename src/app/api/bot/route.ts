@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createRedisFromEnv } from '@/lib/redis';
+import { getTelegramApiBase, tgCall } from '@/lib/telegramApi';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_TG_ID = process.env.ADMIN_TG_ID;
-const APP_URL = process.env.APP_URL || 'https://nekruz2000n-eng-orthobynekruz-91ba.twc1.net';
+const APP_URL = process.env.APP_URL || 'https://nekruz2000n-eng-orthobynekruz-a9a4.twc1.net';
 const ADMIN_URL = process.env.ADMIN_URL || `${APP_URL}/admin`;
 const CHANNEL_USERNAME = 'nzsdental';
 
@@ -17,50 +18,51 @@ function getRedis() {
 }
 
 async function tgSend(chatId: number, body: Record<string, unknown>) {
-  if (!BOT_TOKEN) {
-    console.error('[bot] BOT_TOKEN missing');
-    return;
-  }
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, ...body }),
-    });
-    if (!res.ok) {
-      console.error('[bot] sendMessage failed', res.status, await res.text());
-    }
-  } catch (e) {
-    console.error('[bot] sendMessage error', e);
+  const res = await tgCall('sendMessage', { chat_id: chatId, ...body }, { timeoutMs: 8000 });
+  if (!res.ok) {
+    console.error('[bot] sendMessage failed', res.status, res.error);
   }
 }
 
 async function isSubscribed(userId: number): Promise<boolean> {
-  if (!BOT_TOKEN) return false;
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 4000);
-    const url = `https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=@${CHANNEL_USERNAME}&user_id=${userId}`;
-    const res = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(t);
-    const data = await res.json();
-    if (!data.ok) {
-      // бот не админ канала / API ошибка — не блокируем вход молча
-      console.warn('[bot] getChatMember not ok', data);
-      return true;
-    }
-    const status = data.result.status;
-    return ['member', 'administrator', 'creator'].includes(status);
-  } catch (e) {
-    console.warn('[bot] isSubscribed failed, allowing start', e);
+  const res = await tgCall<{ status: string }>(
+    'getChatMember',
+    { chat_id: `@${CHANNEL_USERNAME}`, user_id: userId },
+    { timeoutMs: 4000 },
+  );
+  if (!res.ok || !res.data) {
+    // бот не админ канала / API ошибка / сеть — не блокируем вход молча
+    console.warn('[bot] getChatMember not ok', res.error);
     return true;
   }
+  return ['member', 'administrator', 'creator'].includes(res.data.status);
 }
 
 function commandOf(text: string): string {
   // "/start", "/Start@BotName payload" → "start"
   const raw = text.trim().split(/\s+/)[0] || '';
   return raw.toLowerCase().replace(/^\//, '').split('@')[0];
+}
+
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  if (url.searchParams.get('diag') !== '1') {
+    return NextResponse.json({ ok: true });
+  }
+  const started = Date.now();
+  const out: Record<string, unknown> = {
+    hasToken: !!BOT_TOKEN,
+    appUrl: APP_URL,
+    adminTgId: ADMIN_TG_ID ? 'set' : 'missing',
+    telegramApiBase: getTelegramApiBase(),
+  };
+  const res = await tgCall<{ username?: string }>('getMe', undefined, { timeoutMs: 8000 });
+  out.telegramReachable = res.ok;
+  out.telegramStatus = res.status;
+  out.botUsername = res.data?.username ?? null;
+  if (!res.ok) out.telegramError = res.error;
+  out.elapsedMs = Date.now() - started;
+  return NextResponse.json(out);
 }
 
 export async function POST(req: Request) {

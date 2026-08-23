@@ -8,7 +8,7 @@ import {
   NeedSubscriptionScreen,
   WebAuthScreen,
 } from '@/components/WebAuthScreen';
-import { applyWebAccountLocal, isInsideTelegramWebApp, webAuth } from '@/lib/webAuthClient';
+import { applyWebAccountLocal, isInsideTelegramWebApp, waitForTelegramWebApp, webAuth } from '@/lib/webAuthClient';
 
 type GatePhase =
   | 'boot'
@@ -33,7 +33,7 @@ export function AuthGate({ onAuthenticated }: Props) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (isInsideTelegramWebApp()) {
+      if (isInsideTelegramWebApp() || (await waitForTelegramWebApp())) {
         if (!cancelled) setPhase('faculty');
         return;
       }
