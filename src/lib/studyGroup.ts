@@ -44,6 +44,14 @@ export function normalizeStudyGroup(raw: string): string {
   return `${num}${tail}`;
 }
 
+/** 208с → stomatology. Обратная операция к buildStudyGroupFromDigits. */
+export function facultyFromStudyGroup(raw: string): string | null {
+  const suffix = normalizeStudyGroup(raw).slice(-1);
+  if (!suffix) return null;
+  const found = Object.entries(FACULTY_GROUP_SUFFIX).find(([, s]) => s === suffix);
+  return found ? found[0] : null;
+}
+
 export function isValidStudyGroup(raw: string): boolean {
   const g = normalizeStudyGroup(raw);
   if (!g || g.length < 3 || g.length > 6) return false;

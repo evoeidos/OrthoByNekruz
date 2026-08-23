@@ -5,9 +5,11 @@
  * админ сохраняет план из интерфейса, копия уходит в Redis и дальше главной
  * становится она — файл остаётся историей исходного документа кафедры.
  */
+import anatStomatology1 from '@/data/programs/anat-stomatology-1.json';
 import anatStomatology2 from '@/data/programs/anat-stomatology-2.json';
 
 const SEED_FILES: unknown[] = [
+  anatStomatology1,
   anatStomatology2,
 ];
 

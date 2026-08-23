@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  ArrowLeft, CalendarDays, CheckCircle2, ChevronRight, Circle,
-  GraduationCap, Target,
+  ArrowLeft, ArrowRight, CalendarDays, CheckCircle2, ChevronRight, Circle,
+  GraduationCap, Target, X,
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Lecture, Lesson, LessonKind } from '@/lib/curriculum';
@@ -16,6 +16,8 @@ const KIND_LABELS: Record<LessonKind, string> = {
   control: 'Контрольная',
   colloquium: 'Коллоквиум',
 };
+
+const CONTROL_COLOR = '#B4801F';
 
 interface StudentProgram {
   id: string;
@@ -29,13 +31,29 @@ interface StudentProgram {
   lectures: Lecture[];
 }
 
-function doneStorageKey(programId: string): string {
-  return `lessons_done:${programId}`;
+/** Занятие вместе с курсом и семестром, из которого оно пришло. */
+interface FlatLesson {
+  lesson: Lesson;
+  course: number;
+  semester?: number;
 }
 
-function readDone(programId: string): Set<string> {
+interface SubjectView {
+  subjectId: string;
+  label: string;
+  color: string;
+  sourceDoc: string | null;
+  items: FlatLesson[];
+  lectures: Lecture[];
+}
+
+function doneStorageKey(subjectId: string): string {
+  return `lessons_done:${subjectId}`;
+}
+
+function readDone(subjectId: string): Set<string> {
   try {
-    const raw = localStorage.getItem(doneStorageKey(programId));
+    const raw = localStorage.getItem(doneStorageKey(subjectId));
     if (!raw) return new Set();
     const parsed: unknown = JSON.parse(raw);
     return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
@@ -44,13 +62,58 @@ function readDone(programId: string): Set<string> {
   }
 }
 
+/** Программы одного предмета склеиваются в непрерывный план по всем курсам. */
+function buildSubjectViews(programs: StudentProgram[]): SubjectView[] {
+  const bySubject = new Map<string, StudentProgram[]>();
+  for (const p of programs) {
+    const list = bySubject.get(p.subjectId) ?? [];
+    list.push(p);
+    bySubject.set(p.subjectId, list);
+  }
+
+  return [...bySubject.entries()].map(([subjectId, list]) => {
+    const sorted = [...list].sort((a, b) => a.course - b.course);
+    const items: FlatLesson[] = [];
+    const lectures: Lecture[] = [];
+
+    for (const p of sorted) {
+      for (const lesson of p.lessons) {
+        items.push({ lesson, course: p.course, semester: lesson.semester });
+      }
+      lectures.push(...p.lectures);
+    }
+
+    items.sort((a, b) => {
+      if (a.course !== b.course) return a.course - b.course;
+      const an = a.lesson.planNumber ?? a.lesson.order;
+      const bn = b.lesson.planNumber ?? b.lesson.order;
+      return an - bn;
+    });
+
+    return {
+      subjectId,
+      label: sorted[0].subjectLabel,
+      color: sorted[0].subjectColor,
+      sourceDoc: sorted[0].sourceDoc,
+      items,
+      lectures,
+    };
+  }).sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+}
+
+function sectionTitle(item: FlatLesson): string {
+  return item.semester
+    ? `${item.course} курс · ${item.semester} семестр`
+    : `${item.course} курс`;
+}
+
 export const LessonsTab = ({ onOpenProfile }: { onOpenProfile?: () => void }) => {
   const [programs, setPrograms] = useState<StudentProgram[]>([]);
   const [studyGroup, setStudyGroup] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [activeProgramId, setActiveProgramId] = useState<string | null>(null);
-  const [openLessonId, setOpenLessonId] = useState<string | null>(null);
+  const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
+  const [readingId, setReadingId] = useState<string | null>(null);
   const [done, setDone] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
@@ -79,48 +142,54 @@ export const LessonsTab = ({ onOpenProfile }: { onOpenProfile?: () => void }) =>
 
   useEffect(() => { void load(); }, [load]);
 
+  const subjects = useMemo(() => buildSubjectViews(programs), [programs]);
+
   useEffect(() => {
-    if (programs.length === 0) {
-      setActiveProgramId(null);
+    if (subjects.length === 0) {
+      setActiveSubjectId(null);
       return;
     }
-    setActiveProgramId(prev => (
-      prev && programs.some(p => p.id === prev) ? prev : programs[0].id
+    setActiveSubjectId(prev => (
+      prev && subjects.some(s => s.subjectId === prev) ? prev : subjects[0].subjectId
     ));
-  }, [programs]);
+  }, [subjects]);
 
-  const program = useMemo(
-    () => programs.find(p => p.id === activeProgramId) ?? null,
-    [programs, activeProgramId],
+  const view = useMemo(
+    () => subjects.find(s => s.subjectId === activeSubjectId) ?? null,
+    [subjects, activeSubjectId],
   );
 
   useEffect(() => {
-    setDone(program ? readDone(program.id) : new Set());
-    setOpenLessonId(null);
-  }, [program]);
+    setDone(view ? readDone(view.subjectId) : new Set());
+    setReadingId(null);
+  }, [view]);
 
   const toggleDone = useCallback((lessonId: string) => {
-    if (!program) return;
+    if (!view) return;
     setDone(prev => {
       const next = new Set(prev);
       if (next.has(lessonId)) next.delete(lessonId);
       else next.add(lessonId);
       try {
-        localStorage.setItem(doneStorageKey(program.id), JSON.stringify([...next]));
+        localStorage.setItem(doneStorageKey(view.subjectId), JSON.stringify([...next]));
       } catch { /* приватный режим — прогресс просто не сохранится */ }
       return next;
     });
-  }, [program]);
+  }, [view]);
 
-  const openLesson = useMemo(
-    () => program?.lessons.find(l => l.id === openLessonId) ?? null,
-    [program, openLessonId],
-  );
+  const readingIndex = view ? view.items.findIndex(i => i.lesson.id === readingId) : -1;
+  const reading = readingIndex >= 0 && view ? view.items[readingIndex] : null;
+
+  const step = useCallback((delta: number) => {
+    if (!view || readingIndex < 0) return;
+    const n = view.items.length;
+    const next = view.items[(readingIndex + delta + n) % n];
+    setReadingId(next.lesson.id);
+  }, [view, readingIndex]);
 
   if (loading) {
     return (
       <EmptyState
-        icon={<CalendarDays className="w-7 h-7" />}
         title="Загружаем расписание"
         text="Секунду — смотрим, какие занятия у твоей группы."
       />
@@ -130,7 +199,6 @@ export const LessonsTab = ({ onOpenProfile }: { onOpenProfile?: () => void }) =>
   if (failed) {
     return (
       <EmptyState
-        icon={<CalendarDays className="w-7 h-7" />}
         title="Не удалось загрузить занятия"
         text="Проверь связь и попробуй ещё раз."
         action={{ label: 'Повторить', onClick: () => void load() }}
@@ -141,166 +209,497 @@ export const LessonsTab = ({ onOpenProfile }: { onOpenProfile?: () => void }) =>
   if (!studyGroup) {
     return (
       <EmptyState
-        icon={<CalendarDays className="w-7 h-7" />}
         title="Сначала укажи группу"
-        text="Занятия приходят из плана кафедры для конкретной группы. Как только группа будет указана, здесь появится твой семестр."
+        text="Занятия приходят из плана кафедры для конкретной группы. Как только группа будет указана, здесь появится весь курс."
         action={onOpenProfile ? { label: 'В профиль', onClick: onOpenProfile } : undefined}
       />
     );
   }
 
-  if (!program) {
+  if (!view) {
     return (
       <EmptyState
-        icon={<CalendarDays className="w-7 h-7" />}
         title={`Для группы ${studyGroup} занятий пока нет`}
-        text="План кафедры ещё не выдан этой группе. Он появится здесь сразу после того, как его откроют."
+        text="План кафедры ещё не открыт. Он появится здесь сразу после того, как предмет станет доступен."
         action={{ label: 'Обновить', onClick: () => void load() }}
       />
     );
   }
 
-  const lessonsTotal = program.lessons.filter(l => l.kind === 'lesson').length;
-  const doneCount = program.lessons.filter(l => done.has(l.id)).length;
+  const doneCount = view.items.filter(i => done.has(i.lesson.id)).length;
+  const controlCount = view.items.filter(i => i.lesson.kind !== 'lesson').length;
 
   return (
     <div className="flex flex-col h-full">
-      <AnimatePresence mode="wait" initial={false}>
-        {openLesson ? (
-          <motion.div
-            key="detail"
-            initial={{ opacity: 0, x: 24 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 24 }}
-            transition={{ duration: 0.18 }}
-            className="flex flex-col h-full"
+      <div
+        className="flex-shrink-0 px-4 pt-4 pb-3"
+        style={{ borderBottom: '1px solid var(--c-border)' }}
+      >
+        <div className="flex items-center gap-2">
+          <span
+            className="text-[19px] font-bold leading-tight"
+            style={{ color: 'var(--c-text)' }}
           >
-            <LessonDetail
-              lesson={openLesson}
-              program={program}
-              isDone={done.has(openLesson.id)}
-              onToggleDone={() => toggleDone(openLesson.id)}
-              onBack={() => setOpenLessonId(null)}
-            />
-          </motion.div>
-        ) : (
-          <motion.div
-            key="list"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="flex flex-col h-full"
+            Занятия
+          </span>
+          <span
+            className="text-[11px] font-bold px-2 py-0.5 rounded-full"
+            style={{
+              background: 'color-mix(in srgb, var(--c-primary) 14%, transparent)',
+              color: 'var(--c-primary)',
+            }}
           >
-            {/* Шапка */}
-            <div
-              className="flex-shrink-0 px-4 pt-4 pb-3"
-              style={{ borderBottom: '1px solid var(--c-border)' }}
-            >
-              <div className="flex items-center gap-2">
-                <span
-                  className="text-[19px] font-bold leading-tight"
-                  style={{ color: 'var(--c-text)' }}
-                >
-                  Занятия
-                </span>
-                <span
-                  className="text-[11px] font-bold px-2 py-0.5 rounded-full"
+            {studyGroup}
+          </span>
+        </div>
+        <div className="text-[12px] mt-1 leading-snug" style={{ color: 'var(--c-muted)' }}>
+          {view.label} · весь курс, {view.items.length} занятий
+        </div>
+
+        {subjects.length > 1 && (
+          <div className="flex flex-wrap gap-1.5 mt-3">
+            {subjects.map(s => {
+              const active = s.subjectId === view.subjectId;
+              return (
+                <button
+                  key={s.subjectId}
+                  type="button"
+                  onClick={() => setActiveSubjectId(s.subjectId)}
+                  className="text-[12px] font-semibold px-2.5 py-1 rounded-full transition-colors"
                   style={{
-                    background: 'color-mix(in srgb, var(--c-primary) 14%, transparent)',
-                    color: 'var(--c-primary)',
+                    background: active
+                      ? `color-mix(in srgb, ${s.color} 18%, transparent)`
+                      : 'var(--c-card)',
+                    color: active ? s.color : 'var(--c-muted)',
+                    border: `1px solid ${active ? s.color : 'var(--c-border)'}`,
                   }}
                 >
-                  {studyGroup}
-                </span>
-              </div>
-              <div
-                className="text-[12px] mt-1 leading-snug"
-                style={{ color: 'var(--c-muted)' }}
-              >
-                {program.title}
-              </div>
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
-              {programs.length > 1 && (
-                <div className="flex flex-wrap gap-1.5 mt-3">
-                  {programs.map(p => {
-                    const active = p.id === program.id;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => setActiveProgramId(p.id)}
-                        className="text-[12px] font-semibold px-2.5 py-1 rounded-full transition-colors"
-                        style={{
-                          background: active
-                            ? `color-mix(in srgb, ${p.subjectColor} 18%, transparent)`
-                            : 'var(--c-card)',
-                          color: active ? p.subjectColor : 'var(--c-muted)',
-                          border: `1px solid ${active ? p.subjectColor : 'var(--c-border)'}`,
-                        }}
-                      >
-                        {p.subjectLabel}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+        <div
+          className="flex items-center gap-1.5 mt-3 text-[11.5px]"
+          style={{ color: 'var(--c-muted)' }}
+        >
+          <div
+            className="flex-1 h-1.5 rounded-full overflow-hidden"
+            style={{ background: 'var(--c-border)' }}
+          >
+            <div
+              className="h-full rounded-full transition-all duration-300"
+              style={{
+                width: `${view.items.length ? (doneCount / view.items.length) * 100 : 0}%`,
+                background: view.color,
+              }}
+            />
+          </div>
+          <span className="tabular-nums">{doneCount} из {view.items.length}</span>
+        </div>
+      </div>
 
-              <div
-                className="flex items-center gap-1.5 mt-3 text-[11.5px]"
-                style={{ color: 'var(--c-muted)' }}
-              >
-                <div
-                  className="flex-1 h-1.5 rounded-full overflow-hidden"
-                  style={{ background: 'var(--c-border)' }}
-                >
+      <ScrollArea className="flex-1">
+        <div className="px-4 py-3 flex flex-col gap-2 pb-28">
+          {view.items.map((item, i) => {
+            const prev = i > 0 ? view.items[i - 1] : null;
+            const showHeader = !prev || sectionTitle(prev) !== sectionTitle(item);
+            return (
+              <React.Fragment key={item.lesson.id}>
+                {showHeader && (
                   <div
-                    className="h-full rounded-full transition-all duration-300"
-                    style={{
-                      width: `${program.lessons.length
-                        ? (doneCount / program.lessons.length) * 100
-                        : 0}%`,
-                      background: program.subjectColor,
-                    }}
-                  />
-                </div>
-                <span className="tabular-nums">{doneCount} из {program.lessons.length}</span>
-              </div>
-            </div>
-
-            <ScrollArea className="flex-1">
-              <div className="px-4 py-3 flex flex-col gap-2 pb-28">
-                {program.lessons.map(lesson => (
-                  <LessonRow
-                    key={lesson.id}
-                    lesson={lesson}
-                    accent={program.subjectColor}
-                    isDone={done.has(lesson.id)}
-                    onOpen={() => setOpenLessonId(lesson.id)}
-                    onToggleDone={() => toggleDone(lesson.id)}
-                  />
-                ))}
-
-                {program.lectures.length > 0 && (
-                  <LecturesBlock lectures={program.lectures} />
+                    className="text-[11px] font-bold uppercase tracking-wider px-1 pt-3 pb-0.5"
+                    style={{ color: 'var(--c-muted)' }}
+                  >
+                    {sectionTitle(item)}
+                  </div>
                 )}
+                <LessonRow
+                  lesson={item.lesson}
+                  accent={view.color}
+                  isDone={done.has(item.lesson.id)}
+                  onOpen={() => setReadingId(item.lesson.id)}
+                  onToggleDone={() => toggleDone(item.lesson.id)}
+                />
+              </React.Fragment>
+            );
+          })}
 
-                <div
-                  className="text-[11px] leading-relaxed mt-2 px-1"
-                  style={{ color: 'var(--c-muted)' }}
-                >
-                  {lessonsTotal} практических занятий и{' '}
-                  {program.lessons.length - lessonsTotal} контрольных точек.
-                  {program.sourceDoc ? ` Источник: ${program.sourceDoc}.` : ''}
-                </div>
-              </div>
-            </ScrollArea>
-          </motion.div>
+          {view.lectures.length > 0 && <LecturesBlock lectures={view.lectures} />}
+
+          <div
+            className="text-[11px] leading-relaxed mt-2 px-1"
+            style={{ color: 'var(--c-muted)' }}
+          >
+            {view.items.length - controlCount} практических занятий и {controlCount}{' '}
+            контрольных точек.
+            {view.sourceDoc ? ` Источник: ${view.sourceDoc}.` : ''}
+          </div>
+        </div>
+      </ScrollArea>
+
+      <AnimatePresence>
+        {reading && (
+          <ReadingView
+            item={reading}
+            accent={view.color}
+            subjectLabel={view.label}
+            allItems={view.items}
+            isDone={done.has(reading.lesson.id)}
+            onToggleDone={() => toggleDone(reading.lesson.id)}
+            onPrev={() => step(-1)}
+            onNext={() => step(1)}
+            onClose={() => setReadingId(null)}
+          />
         )}
       </AnimatePresence>
     </div>
   );
 };
+
+// ─── Режим чтения ──────────────────────────────────────────────────────────
+
+function ReadingView({
+  item,
+  accent,
+  subjectLabel,
+  allItems,
+  isDone,
+  onToggleDone,
+  onPrev,
+  onNext,
+  onClose,
+}: {
+  item: FlatLesson;
+  accent: string;
+  subjectLabel: string;
+  allItems: FlatLesson[];
+  isDone: boolean;
+  onToggleDone: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+  onClose: () => void;
+}) {
+  const { lesson } = item;
+  const isControl = lesson.kind !== 'lesson';
+  const [fontSize, setFontSize] = useState(16);
+  const initialDistance = useRef<number | null>(null);
+  const initialFontSize = useRef(16);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [lesson.id]);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      initialDistance.current = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+      initialFontSize.current = fontSize;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && initialDistance.current !== null) {
+      const d = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+      setFontSize(Math.max(12, Math.min(28, Math.round(
+        initialFontSize.current * d / initialDistance.current,
+      ))));
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (e.touches.length < 2) initialDistance.current = null;
+  };
+
+  const covered = useMemo(() => {
+    if (!lesson.covers?.length) return [];
+    const set = new Set(lesson.covers);
+    return allItems
+      .map(i => i.lesson)
+      .filter(l => l.planNumber && set.has(l.planNumber));
+  }, [lesson.covers, allItems]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 80 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 80 }}
+      transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+      className="fixed inset-0 z-[100] flex flex-col overflow-hidden"
+      style={{ background: 'var(--c-bg)' }}
+    >
+      <div
+        className="flex items-center justify-center px-3 py-2 flex-shrink-0"
+        style={{
+          background: 'color-mix(in srgb, var(--c-bg) 92%, transparent)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          borderBottom: '1px solid var(--c-border)',
+          paddingTop: 'calc(var(--header-pt) - 28px)',
+        }}
+      >
+        <div className="text-center min-w-0">
+          <div
+            className="text-[10px] font-bold uppercase tracking-widest"
+            style={{ color: 'var(--c-muted)' }}
+          >
+            Чтение
+          </div>
+          <div
+            className="text-[12px] font-mono font-bold leading-tight"
+            style={{ color: 'var(--c-text)' }}
+          >
+            Тема {lesson.planNumber ?? lesson.order} · {subjectLabel}
+          </div>
+        </div>
+      </div>
+
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto px-5 pt-2 scroll-container"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        <div className="space-y-4 pb-32 max-w-2xl mx-auto w-full overflow-x-hidden">
+          <div className="flex items-center gap-2 pt-2 flex-wrap">
+            <span
+              className="text-[11px] font-mono font-bold px-3 py-1 rounded-lg"
+              style={{
+                background: isControl
+                  ? `color-mix(in srgb, ${CONTROL_COLOR} 16%, transparent)`
+                  : 'var(--c-primary-dim)',
+                color: isControl ? CONTROL_COLOR : 'var(--c-primary)',
+                border: `1px solid ${isControl
+                  ? `color-mix(in srgb, ${CONTROL_COLOR} 40%, transparent)`
+                  : 'var(--c-primary-br)'}`,
+              }}
+            >
+              {KIND_LABELS[lesson.kind]} №{lesson.planNumber ?? lesson.order}
+            </span>
+            <span className="text-[11px]" style={{ color: 'var(--c-muted)' }}>
+              {sectionTitle(item)}
+              {lesson.hours ? ` · ${lesson.hours} ч` : ''}
+            </span>
+          </div>
+
+          <h2
+            className="font-semibold leading-snug break-words"
+            style={{ fontSize: `${fontSize * 1.15}px`, color: 'var(--c-text)' }}
+          >
+            {lesson.title}
+          </h2>
+
+          {lesson.summary && (
+            <div
+              className="leading-relaxed font-normal break-words"
+              style={{
+                fontSize: `${fontSize}px`,
+                color: 'color-mix(in srgb, var(--c-text) 92%, transparent)',
+              }}
+            >
+              {lesson.summary}
+            </div>
+          )}
+
+          {lesson.objectives?.length ? (
+            <>
+              <div
+                className="flex items-center gap-3"
+                style={{ borderTop: '1px solid var(--c-border)', paddingTop: 12 }}
+              >
+                <Target className="w-4 h-4 flex-shrink-0" style={{ color: accent }} />
+                <span
+                  className="text-[11px] font-bold uppercase tracking-widest"
+                  style={{ color: accent }}
+                >
+                  Что уметь к паре
+                </span>
+              </div>
+              <ul className="flex flex-col gap-2.5">
+                {lesson.objectives.map((text, i) => (
+                  <li key={i} className="flex gap-2.5">
+                    <span
+                      className="flex-shrink-0 font-extrabold tabular-nums"
+                      style={{ fontSize: `${fontSize * 0.8}px`, color: accent, marginTop: 2 }}
+                    >
+                      {i + 1}
+                    </span>
+                    <span
+                      className="leading-snug break-words"
+                      style={{
+                        fontSize: `${fontSize * 0.94}px`,
+                        color: 'color-mix(in srgb, var(--c-text) 92%, transparent)',
+                      }}
+                    >
+                      {text}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+
+          {covered.length > 0 && (
+            <>
+              <div
+                className="flex items-center gap-3"
+                style={{ borderTop: '1px solid var(--c-border)', paddingTop: 12 }}
+              >
+                <GraduationCap
+                  className="w-4 h-4 flex-shrink-0"
+                  style={{ color: CONTROL_COLOR }}
+                />
+                <span
+                  className="text-[11px] font-bold uppercase tracking-widest"
+                  style={{ color: CONTROL_COLOR }}
+                >
+                  Что войдёт
+                </span>
+              </div>
+              <ul className="flex flex-col gap-2">
+                {covered.map(l => (
+                  <li key={l.id} className="flex gap-2.5">
+                    <span
+                      className="flex-shrink-0 font-extrabold tabular-nums"
+                      style={{
+                        fontSize: `${fontSize * 0.8}px`,
+                        color: CONTROL_COLOR,
+                        marginTop: 2,
+                      }}
+                    >
+                      {l.planNumber}
+                    </span>
+                    <span
+                      className="leading-snug break-words"
+                      style={{
+                        fontSize: `${fontSize * 0.94}px`,
+                        color: 'color-mix(in srgb, var(--c-text) 92%, transparent)',
+                      }}
+                    >
+                      {l.title}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {lesson.terms?.length ? (
+            <>
+              <div
+                className="flex items-center gap-3"
+                style={{ borderTop: '1px solid var(--c-border)', paddingTop: 12 }}
+              >
+                <span
+                  className="text-[11px] font-bold uppercase tracking-widest"
+                  style={{ color: accent }}
+                >
+                  Термины · {lesson.terms.length}
+                </span>
+              </div>
+              <ul className="flex flex-col gap-1.5">
+                {lesson.terms.map(term => (
+                  <li
+                    key={term}
+                    className="leading-snug break-words"
+                    style={{
+                      fontSize: `${fontSize * 0.9}px`,
+                      color: 'color-mix(in srgb, var(--c-text) 92%, transparent)',
+                    }}
+                  >
+                    {term}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+
+          {lesson.note && (
+            <div
+              className="leading-relaxed"
+              style={{ fontSize: `${fontSize * 0.85}px`, color: 'var(--c-muted)' }}
+            >
+              {lesson.note}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div
+        className="fixed left-0 right-0 px-5 z-[110] flex justify-center"
+        style={{ bottom: 'calc(var(--nav-bottom, 12px) + 12px)' }}
+      >
+        <div
+          className="flex items-center gap-1.5 p-1.5 rounded-[28px] shadow-2xl"
+          style={{
+            background: 'var(--c-nav-bg)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            border: '1.5px solid var(--c-nav-border)',
+            boxShadow: '0 8px 32px hsl(0 0% 0% / 0.4)',
+          }}
+        >
+          <button
+            type="button"
+            onClick={onPrev}
+            className="w-10 h-10 flex items-center justify-center rounded-full flex-shrink-0 transition-all active:scale-95"
+            style={{ color: 'var(--c-muted)' }}
+            aria-label="Предыдущее занятие"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={onToggleDone}
+            className="flex items-center justify-center gap-2 px-4 h-10 rounded-full text-sm font-bold transition-all active:scale-[0.97]"
+            style={isDone
+              ? { background: 'var(--c-primary)', color: 'hsl(var(--primary-foreground))' }
+              : {
+                background: 'var(--c-primary-dim)',
+                color: 'var(--c-primary)',
+                border: '1px solid var(--c-primary-br)',
+              }}
+          >
+            {isDone
+              ? <><CheckCircle2 className="w-4 h-4" /> Пройдено</>
+              : <><Circle className="w-4 h-4" /> Прошёл</>}
+          </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex items-center justify-center gap-2 px-4 h-10 rounded-full text-sm font-semibold transition-all active:scale-[0.97]"
+            style={{ color: 'var(--c-muted)', border: '1px solid var(--c-border)' }}
+          >
+            <X className="w-4 h-4" /> Выйти
+          </button>
+
+          <button
+            type="button"
+            onClick={onNext}
+            className="w-10 h-10 flex items-center justify-center rounded-full flex-shrink-0 transition-all active:scale-95"
+            style={{ color: 'var(--c-muted)' }}
+            aria-label="Следующее занятие"
+          >
+            <ArrowRight className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Список ────────────────────────────────────────────────────────────────
 
 function LessonRow({
   lesson,
@@ -316,7 +715,7 @@ function LessonRow({
   onToggleDone: () => void;
 }) {
   const isControl = lesson.kind !== 'lesson';
-  const badgeColor = isControl ? '#B4801F' : accent;
+  const badgeColor = isControl ? CONTROL_COLOR : accent;
 
   return (
     <div
@@ -324,7 +723,7 @@ function LessonRow({
       style={{
         background: 'var(--c-card)',
         border: `1px solid ${isControl
-          ? 'color-mix(in srgb, #B4801F 40%, var(--c-border))'
+          ? `color-mix(in srgb, ${CONTROL_COLOR} 40%, var(--c-border))`
           : 'var(--c-border)'}`,
         opacity: isDone ? 0.7 : 1,
       }}
@@ -366,8 +765,8 @@ function LessonRow({
             <span
               className="inline-block text-[10.5px] font-bold mt-1 px-1.5 py-0.5 rounded"
               style={{
-                background: 'color-mix(in srgb, #B4801F 16%, transparent)',
-                color: '#B4801F',
+                background: `color-mix(in srgb, ${CONTROL_COLOR} 16%, transparent)`,
+                color: CONTROL_COLOR,
               }}
             >
               {KIND_LABELS[lesson.kind]}
@@ -381,199 +780,6 @@ function LessonRow({
         />
       </button>
     </div>
-  );
-}
-
-function LessonDetail({
-  lesson,
-  program,
-  isDone,
-  onToggleDone,
-  onBack,
-}: {
-  lesson: Lesson;
-  program: StudentProgram;
-  isDone: boolean;
-  onToggleDone: () => void;
-  onBack: () => void;
-}) {
-  const isControl = lesson.kind !== 'lesson';
-  const coveredLessons = useMemo(() => {
-    if (!lesson.covers?.length) return [];
-    const set = new Set(lesson.covers);
-    return program.lessons.filter(l => l.planNumber && set.has(l.planNumber));
-  }, [lesson.covers, program.lessons]);
-
-  return (
-    <>
-      <div
-        className="flex-shrink-0 flex items-center gap-2 px-3 py-3"
-        style={{ borderBottom: '1px solid var(--c-border)' }}
-      >
-        <button
-          type="button"
-          onClick={onBack}
-          className="p-1.5 rounded-full"
-          style={{ color: 'var(--c-muted)' }}
-          aria-label="Назад к списку"
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <span
-          className="text-[12.5px] font-semibold flex-1 truncate"
-          style={{ color: 'var(--c-muted)' }}
-        >
-          {isControl ? KIND_LABELS[lesson.kind] : 'Занятие'}
-          {lesson.planNumber ? ` · тема ${lesson.planNumber}` : ''}
-          {lesson.hours ? ` · ${lesson.hours} ч` : ''}
-        </span>
-        <button
-          type="button"
-          onClick={onToggleDone}
-          className="text-[12px] font-bold px-2.5 py-1.5 rounded-full"
-          style={{
-            background: isDone
-              ? `color-mix(in srgb, ${program.subjectColor} 16%, transparent)`
-              : 'var(--c-card)',
-            color: isDone ? program.subjectColor : 'var(--c-muted)',
-            border: `1px solid ${isDone ? program.subjectColor : 'var(--c-border)'}`,
-          }}
-        >
-          {isDone ? 'Пройдено' : 'Отметить'}
-        </button>
-      </div>
-
-      <ScrollArea className="flex-1">
-        <div className="px-4 py-4 pb-28 flex flex-col gap-4">
-          <h2
-            className="text-[18px] font-bold leading-snug"
-            style={{ color: 'var(--c-text)' }}
-          >
-            {lesson.title}
-          </h2>
-
-          {lesson.summary && (
-            <p
-              className="text-[14px] leading-relaxed"
-              style={{ color: 'var(--c-text)' }}
-            >
-              {lesson.summary}
-            </p>
-          )}
-
-          {lesson.objectives?.length ? (
-            <section
-              className="rounded-2xl p-3.5"
-              style={{
-                background: 'var(--c-card)',
-                border: '1px solid var(--c-border)',
-              }}
-            >
-              <div className="flex items-center gap-1.5 mb-2.5">
-                <Target
-                  className="w-[15px] h-[15px]"
-                  style={{ color: program.subjectColor }}
-                />
-                <span
-                  className="text-[12.5px] font-bold"
-                  style={{ color: 'var(--c-text)' }}
-                >
-                  Что уметь к паре
-                </span>
-              </div>
-              <ul className="flex flex-col gap-2">
-                {lesson.objectives.map((item, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span
-                      className="flex-shrink-0 text-[11px] font-extrabold tabular-nums mt-[3px]"
-                      style={{ color: program.subjectColor }}
-                    >
-                      {i + 1}
-                    </span>
-                    <span
-                      className="text-[13px] leading-snug"
-                      style={{ color: 'var(--c-text)' }}
-                    >
-                      {item}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-
-          {coveredLessons.length > 0 && (
-            <section
-              className="rounded-2xl p-3.5"
-              style={{
-                background: 'color-mix(in srgb, #B4801F 8%, var(--c-card))',
-                border: '1px solid color-mix(in srgb, #B4801F 35%, var(--c-border))',
-              }}
-            >
-              <div className="flex items-center gap-1.5 mb-2.5">
-                <GraduationCap className="w-[15px] h-[15px]" style={{ color: '#B4801F' }} />
-                <span className="text-[12.5px] font-bold" style={{ color: 'var(--c-text)' }}>
-                  Что войдёт
-                </span>
-              </div>
-              <ul className="flex flex-col gap-1.5">
-                {coveredLessons.map(l => (
-                  <li key={l.id} className="flex gap-2">
-                    <span
-                      className="flex-shrink-0 text-[11px] font-extrabold tabular-nums mt-[2px]"
-                      style={{ color: '#B4801F' }}
-                    >
-                      {l.planNumber}
-                    </span>
-                    <span
-                      className="text-[12.5px] leading-snug"
-                      style={{ color: 'var(--c-text)' }}
-                    >
-                      {l.title}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {lesson.terms?.length ? (
-            <section>
-              <div
-                className="text-[12.5px] font-bold mb-2"
-                style={{ color: 'var(--c-text)' }}
-              >
-                Термины занятия
-                <span className="font-medium ml-1.5" style={{ color: 'var(--c-muted)' }}>
-                  {lesson.terms.length}
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {lesson.terms.map(term => (
-                  <span
-                    key={term}
-                    className="text-[12px] px-2.5 py-1 rounded-full"
-                    style={{
-                      background: 'var(--c-card)',
-                      border: '1px solid var(--c-border)',
-                      color: 'var(--c-text)',
-                    }}
-                  >
-                    {term}
-                  </span>
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {lesson.note && (
-            <p className="text-[12px] leading-relaxed" style={{ color: 'var(--c-muted)' }}>
-              {lesson.note}
-            </p>
-          )}
-        </div>
-      </ScrollArea>
-    </>
   );
 }
 
@@ -591,7 +797,7 @@ function LecturesBlock({ lectures }: { lectures: Lecture[] }) {
         className="w-full flex items-center gap-2 px-3 py-2.5 text-left"
       >
         <span className="flex-1 text-[13px] font-semibold" style={{ color: 'var(--c-text)' }}>
-          Лекции семестра
+          Лекции курса
           <span className="font-medium ml-1.5" style={{ color: 'var(--c-muted)' }}>
             {lectures.length}
           </span>
@@ -639,19 +845,17 @@ function LecturesBlock({ lectures }: { lectures: Lecture[] }) {
 }
 
 function EmptyState({
-  icon,
   title,
   text,
   action,
 }: {
-  icon: React.ReactNode;
   title: string;
   text: string;
   action?: { label: string; onClick: () => void };
 }) {
   return (
     <div className="h-full flex flex-col items-center justify-center px-8 text-center gap-3">
-      <div style={{ color: 'var(--c-muted)' }}>{icon}</div>
+      <CalendarDays className="w-7 h-7" style={{ color: 'var(--c-muted)' }} />
       <div className="text-[15px] font-bold" style={{ color: 'var(--c-text)' }}>
         {title}
       </div>
@@ -663,10 +867,7 @@ function EmptyState({
           type="button"
           onClick={action.onClick}
           className="mt-1 text-[13px] font-bold px-4 py-2 rounded-full"
-          style={{
-            background: 'var(--c-primary)',
-            color: 'var(--c-bg)',
-          }}
+          style={{ background: 'var(--c-primary)', color: 'var(--c-bg)' }}
         >
           {action.label}
         </button>
@@ -675,12 +876,16 @@ function EmptyState({
   );
 }
 
-/** [31,32,33,34] → «31–34», [31,33] → «31, 33» */
+/** [31,32,33,34] → «31–34», [1,2,3,5,6] → «1–3, 5, 6» */
 function formatCovers(covers: number[]): string {
-  const sorted = [...covers].sort((a, b) => a - b);
-  const isRange = sorted.length > 2
-    && sorted.every((n, i) => i === 0 || n === sorted[i - 1] + 1);
-  return isRange
-    ? `${sorted[0]}–${sorted[sorted.length - 1]}`
-    : sorted.join(', ');
+  const sorted = [...new Set(covers)].sort((a, b) => a - b);
+  const runs: number[][] = [];
+  for (const n of sorted) {
+    const last = runs[runs.length - 1];
+    if (last && n === last[last.length - 1] + 1) last.push(n);
+    else runs.push([n]);
+  }
+  return runs
+    .map(run => (run.length > 2 ? `${run[0]}–${run[run.length - 1]}` : run.join(', ')))
+    .join(', ');
 }

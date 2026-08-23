@@ -1,17 +1,34 @@
 /**
- * /api/curriculum — занятия по плану кафедры для группы студента.
+ * /api/curriculum — занятия по плану кафедры для студента.
  *
- * Что видит студент, решает админ: программа появляется у группы только после
- * того, как её выдали во вкладке «Занятия». Поэтому отдельной проверки оплаты
- * здесь нет — назначение программы группе и есть разрешение.
+ * Планы приходят двумя путями. Первый: у студента открыт предмет — тогда он
+ * видит всю дисциплину своего факультета целиком, за все курсы, а не только
+ * свой семестр. Второй: админ выдал план конкретной группе — так можно открыть
+ * занятия по предмету, который студент не покупал.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
 import { verifyInitDataUser } from '@/lib/verifyInitData';
 import { getSubject } from '@/lib/subjects';
-import { normalizeStudyGroup } from '@/lib/studyGroup';
-import { loadAllPrograms, loadGroupPrograms, programsForGroup } from '@/lib/curriculum';
+import { applyGroupAccessToUser, loadGroupAccessRules } from '@/lib/groupAccess';
+import { facultyFromStudyGroup, normalizeStudyGroup } from '@/lib/studyGroup';
+import {
+  type Program,
+  loadAllPrograms,
+  loadGroupPrograms,
+  programsForGroup,
+} from '@/lib/curriculum';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
+
+function userHasSubject(user: Record<string, unknown>, subjectId: string): boolean {
+  const subjects = user.subjects;
+  if (subjects && typeof subjects === 'object') {
+    return (subjects as Record<string, unknown>)[subjectId] === true;
+  }
+  if (subjectId === 'ortho') return !!user.activatedKey;
+  if (subjectId === 'micro') return user.micro === true;
+  return false;
+}
 
 const redis = createRedisFromEnv();
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
@@ -34,7 +51,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const raw: unknown = await redis.get(`user_id:${telegramId}`);
-    const user = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+    let user = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
     if (!user || user.blocked === true) {
       return res.status(403).json({ error: 'Forbidden' });
     }
@@ -44,12 +61,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ ok: true, studyGroup: null, programs: [] });
     }
 
+    // Доступ по группе мог появиться после последнего входа студента
+    const rules = await loadGroupAccessRules(redis);
+    user = applyGroupAccessToUser(user, rules).user as Record<string, unknown>;
+
     const [allPrograms, groupMap] = await Promise.all([
       loadAllPrograms(redis),
       loadGroupPrograms(redis),
     ]);
 
-    const programs = programsForGroup(groupMap, studyGroup, allPrograms).map(p => {
+    const facultyId = String(user.facultyId || '') || facultyFromStudyGroup(studyGroup);
+
+    const byId = new Map<string, Program>();
+    for (const p of programsForGroup(groupMap, studyGroup, allPrograms)) {
+      byId.set(p.id, p);
+    }
+    for (const p of allPrograms) {
+      if (p.facultyId === facultyId && userHasSubject(user, p.subjectId)) {
+        byId.set(p.id, p);
+      }
+    }
+
+    const programs = [...byId.values()].sort((a, b) => {
+      if (a.subjectId !== b.subjectId) return a.subjectId.localeCompare(b.subjectId);
+      return a.course - b.course;
+    }).map(p => {
       const subject = getSubject(p.subjectId);
       return {
         id: p.id,
