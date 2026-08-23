@@ -1,10 +1,12 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { BookOpen, ClipboardList, PenTool, BarChart3, Layers, Scale } from 'lucide-react';
+import {
+  BookOpen, ClipboardList, BarChart3, Layers, Scale, CalendarDays, GraduationCap,
+} from 'lucide-react';
 import { subjectHasQuestionGameModes } from '@/lib/subjects';
 
-export type TabType = 'questions' | 'tests' | 'tasks' | 'stats';
+export type TabType = 'lessons' | 'questions' | 'tests' | 'tasks' | 'stats';
 
 export type BioGameMode = 'list' | 'flashcards' | 'true_false';
 
@@ -22,12 +24,33 @@ interface NavigationProps {
 
 const LONG_PRESS_MS = 550;
 
-const ALL_TABS: { id: TabType; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: 'questions', label: 'Вопросы',    Icon: BookOpen      },
-  { id: 'tests',     label: 'Тесты',      Icon: ClipboardList },
-  { id: 'tasks',     label: 'Задачи',     Icon: PenTool       },
-  { id: 'stats',     label: 'Статистика', Icon: BarChart3     },
+/**
+ * Пункт навбара может объединять несколько экранов: «Экзамен» — это вопросы и
+ * задачи, между которыми переключаются сегментами внутри активной кнопки.
+ * Внутренние id экранов не меняются, поэтому доступ по модулям и оплата
+ * продолжают работать как раньше.
+ */
+interface NavItem {
+  key: string;
+  label: string;
+  Icon: React.ComponentType<{ className?: string }>;
+  tabs: TabType[];
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { key: 'lessons', label: 'Занятия', Icon: CalendarDays,   tabs: ['lessons'] },
+  { key: 'exam',    label: 'Экзамен', Icon: GraduationCap,  tabs: ['questions', 'tasks'] },
+  { key: 'tests',   label: 'Тест',    Icon: ClipboardList,  tabs: ['tests'] },
+  { key: 'stats',   label: 'Профиль', Icon: BarChart3,      tabs: ['stats'] },
 ];
+
+const TAB_SHORT_LABEL: Record<TabType, string> = {
+  lessons:   'Занятия',
+  questions: 'Вопросы',
+  tests:     'Тест',
+  tasks:     'Задачи',
+  stats:     'Профиль',
+};
 
 const BIO_CYCLE: BioGameMode[] = ['list', 'flashcards', 'true_false'];
 
@@ -63,10 +86,11 @@ export const Navigation: React.FC<NavigationProps> = ({
   bioGameMode = 'list',
   gameModesSubject,
 }) => {
-  const tabs = hiddenTabs && hiddenTabs.length
-    ? ALL_TABS.filter(t => !hiddenTabs.includes(t.id))
-    : ALL_TABS;
-  if (tabs.length === 0) return null;
+  const hidden = hiddenTabs ?? [];
+  const items = NAV_ITEMS
+    .map(item => ({ ...item, tabs: item.tabs.filter(t => !hidden.includes(t)) }))
+    .filter(item => item.tabs.length > 0);
+  if (items.length === 0) return null;
 
   const cycleTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rafId        = useRef<number | null>(null);
@@ -93,12 +117,8 @@ export const Navigation: React.FC<NavigationProps> = ({
     setHintMode('none');
   }, []);
 
-  const handlePressStart = useCallback((tabId: TabType) => {
-    const isGameQuestions = tabId === 'questions'
-      && !!gameModesSubject
-      && subjectHasQuestionGameModes(gameModesSubject)
-      && !!onBioModeCycle;
-    if (!isGameQuestions) return;
+  const handlePressStart = useCallback((canCycle: boolean) => {
+    if (!canCycle) return;
 
     longPressFired.current = false;
     pressActive.current = true;
@@ -122,7 +142,7 @@ export const Navigation: React.FC<NavigationProps> = ({
       onBioModeCycle?.();
       resetPressVisuals();
     }, LONG_PRESS_MS);
-  }, [gameModesSubject, onBioModeCycle, bioGameMode, clearPressAnim, resetPressVisuals]);
+  }, [onBioModeCycle, bioGameMode, clearPressAnim, resetPressVisuals]);
 
   const handlePressEnd = useCallback(() => {
     if (!pressActive.current) return;
@@ -159,10 +179,12 @@ export const Navigation: React.FC<NavigationProps> = ({
           boxShadow: '0 10px 30px hsl(0 0% 0% / 0.28), 0 2px 6px hsl(0 0% 0% / 0.12)',
         }}
       >
-        {tabs.map(tab => {
-          const isActive = activeTab === tab.id;
-          const Icon = tab.Icon;
-          const isGameQuestions = tab.id === 'questions'
+        {items.map(item => {
+          const isActive = item.tabs.includes(activeTab);
+          const Icon = item.Icon;
+          const hasSegments = item.tabs.length > 1;
+          const isGameQuestions = isActive
+            && activeTab === 'questions'
             && !!gameModesSubject
             && subjectHasQuestionGameModes(gameModesSubject)
             && !!onBioModeCycle;
@@ -184,19 +206,21 @@ export const Navigation: React.FC<NavigationProps> = ({
               : `0 0 0 2px ${ringColor}, 0 0 14px ${base}`;
           }
 
-          const navLabel = isGameQuestions && isActive && bioGameMode !== 'list'
-            ? MODE_META[bioGameMode].navLabel
-            : tab.label;
+          const navLabel = item.label;
 
           return (
             <button
-              key={tab.id}
+              key={item.key}
               type="button"
-              onClick={() => handleTabClick(tab.id)}
-              onMouseDown={() => handlePressStart(tab.id)}
+              onClick={() => {
+                // Активный «Экзамен» переключают сегментами, а не самой кнопкой
+                if (isActive && hasSegments) return;
+                handleTabClick(item.tabs[0]);
+              }}
+              onMouseDown={() => handlePressStart(isGameQuestions)}
               onMouseUp={handlePressEnd}
               onMouseLeave={handlePressEnd}
-              onTouchStart={() => handlePressStart(tab.id)}
+              onTouchStart={() => handlePressStart(isGameQuestions)}
               onTouchEnd={handlePressEnd}
               onTouchCancel={handlePressEnd}
               className="relative flex flex-col items-center gap-0.5 rounded-full transition-all duration-200 select-none"
@@ -225,23 +249,35 @@ export const Navigation: React.FC<NavigationProps> = ({
                 )}
               </span>
 
-              {isGameQuestions && isActive && (
-                <span className="flex items-center gap-[3px]" aria-hidden>
-                  {BIO_CYCLE.map(mode => (
-                    <span
-                      key={mode}
-                      className="rounded-full transition-all duration-200"
-                      style={{
-                        width: bioGameMode === mode ? 5 : 3,
-                        height: bioGameMode === mode ? 5 : 3,
-                        background: bioGameMode === mode
-                          ? 'var(--c-bg)'
-                          : 'var(--c-bg)',
-                        opacity: bioGameMode === mode ? 1 : holdProgress > 0 && hintMode === mode ? 0.85 : 0.35,
-                        transform: holdProgress > 0 && hintMode === mode ? 'scale(1.25)' : undefined,
-                      }}
-                    />
-                  ))}
+              {isActive && hasSegments && (
+                <span className="flex items-center gap-0.5">
+                  {item.tabs.map(t => {
+                    const segActive = t === activeTab;
+                    const segLabel = t === 'questions' && bioGameMode !== 'list'
+                      ? MODE_META[bioGameMode].navLabel
+                      : TAB_SHORT_LABEL[t];
+                    return (
+                      <span
+                        key={t}
+                        role="button"
+                        tabIndex={0}
+                        onClick={e => {
+                          e.stopPropagation();
+                          onTabChange(t);
+                        }}
+                        className="text-[10.5px] font-bold leading-tight rounded-full transition-opacity duration-200"
+                        style={{
+                          padding: '1px 6px',
+                          background: segActive
+                            ? 'color-mix(in srgb, var(--c-bg) 30%, transparent)'
+                            : 'transparent',
+                          opacity: segActive ? 1 : 0.5,
+                        }}
+                      >
+                        {segLabel}
+                      </span>
+                    );
+                  })}
                 </span>
               )}
             </button>

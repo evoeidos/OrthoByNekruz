@@ -16,6 +16,7 @@ import {
   getGroupRegistryEntry,
   parseCourseFromGroupDigits,
 } from '@/lib/groupRegistry';
+import { buildGroupCatalogTree, type GroupCatalogOverlay } from '@/lib/groupCatalog';
 import { normalizeStudyGroup } from '@/lib/studyGroup';
 import {
   ensureStomatologyBioTasksVisible,
@@ -447,8 +448,12 @@ export function upsertGroupAccessRule(
   return [...rules, next];
 }
 
-export function getAdminGroupAccessTree(rules: GroupAccessRule[]) {
-  return buildFacultyGroupTree().map(fac => ({
+export function getAdminGroupAccessTree(
+  rules: GroupAccessRule[],
+  overlay?: GroupCatalogOverlay,
+) {
+  const tree = overlay ? buildGroupCatalogTree(overlay) : buildFacultyGroupTree();
+  return tree.map(fac => ({
     ...fac,
     courses: fac.courses.map(c => ({
       ...c,

@@ -16,6 +16,7 @@ import { QuestionsTab }  from '@/components/QuestionsTab';
 import { TestsTab }      from '@/components/TestsTab';
 import { TasksTab }      from '@/components/TasksTab';
 import { StatsTab }      from '@/components/StatsTab';
+import { LessonsTab }    from '@/components/LessonsTab';
 import { Loader2 }       from 'lucide-react';
 import { useToast }      from '@/hooks/use-toast';
 import { applyClientAccessCacheVersion, clearPreviewClientKeys } from '@/lib/accessCache';
@@ -1551,7 +1552,7 @@ export default function Home() {
   useEffect(() => {
     const hidden = navigationHiddenTabs;
     if (!hidden.includes(activeTab)) return;
-    const order: TabType[] = ['questions', 'tests', 'tasks', 'stats'];
+    const order: TabType[] = ['lessons', 'questions', 'tests', 'tasks', 'stats'];
     const next = order.find(t => !hidden.includes(t));
     if (next) setActiveTab(next);
   }, [subject, navigationHiddenTabs, activeTab]);
@@ -1902,6 +1903,9 @@ export default function Home() {
         </div>
       )}
       <div className="flex-1 overflow-hidden relative">
+        {activeTab === 'lessons'   && (
+          <LessonsTab onOpenProfile={() => setActiveTab('stats')} />
+        )}
         {activeTab === 'questions' && renderModuleTab('questions', (
           <QuestionsTab
             subject={subject}

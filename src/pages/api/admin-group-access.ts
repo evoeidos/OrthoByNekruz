@@ -17,6 +17,7 @@ import {
   normalizeModules,
 } from '@/lib/groupAccess';
 import { buildSubjectCatalog } from '@/lib/subjectCatalog';
+import { loadGroupCatalogOverlay } from '@/lib/groupCatalog';
 
 const redis = createRedisFromEnv();
 const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
@@ -49,9 +50,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const rules = await loadGroupAccessRules(redis);
 
     if (action === 'tree') {
+      const overlay = await loadGroupCatalogOverlay(redis);
       return res.status(200).json({
         ok: true,
-        tree: getAdminGroupAccessTree(rules),
+        tree: getAdminGroupAccessTree(rules, overlay),
         subjects: SUBJECTS.map(s => ({
           id: s.id,
           label: s.label,
@@ -109,7 +111,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       return res.status(200).json({
         ok: true,
-        tree: getAdminGroupAccessTree(next),
+        tree: getAdminGroupAccessTree(next, await loadGroupCatalogOverlay(redis)),
         synced,
       });
     }
@@ -155,7 +157,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       return res.status(200).json({
         ok: true,
-        tree: getAdminGroupAccessTree(next),
+        tree: getAdminGroupAccessTree(next, await loadGroupCatalogOverlay(redis)),
         synced,
         updated: studyGroups.length,
       });

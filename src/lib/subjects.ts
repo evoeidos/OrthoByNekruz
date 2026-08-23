@@ -226,7 +226,7 @@ export const SUBJECTS: SubjectConfig[] = [
     label:          'Анатомия',
     shortLabel:     'anat',
     sub:            'Вопросы · Тесты · Задачи',
-    badge:          '1 курс',
+    badge:          '1–2 курс',
     color:          'hsl(0 75% 55%)',
     dimColor:       'hsl(0 75% 55% / 0.12)',
     borderColor:    'hsl(0 75% 55% / 0.28)',

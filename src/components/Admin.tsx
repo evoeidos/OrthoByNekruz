@@ -8,6 +8,7 @@ import { formatPriceRub } from '@/lib/previewPricing';
 import { getTgChatHref, formatTgChatLabel, openTgChat, normalizeTelegramUsername, isValidTelegramUsername } from '@/lib/tgLinks';
 import { AdminPatternLock, ADMIN_PATTERN, ADMIN_UNLOCK_SECRET } from '@/components/AdminPatternLock';
 import AdminGroupAccessTab from '@/components/AdminGroupAccessTab';
+import AdminCurriculumTab from '@/components/AdminCurriculumTab';
 
 interface User {
   tgId:          string;
@@ -50,7 +51,7 @@ interface User {
   paid:          boolean;
 }
 
-type AdminTab = 'students' | 'access' | 'settings';
+type AdminTab = 'students' | 'access' | 'lessons' | 'settings';
 
 interface SubjectInfo {
   id:         string;
@@ -2482,6 +2483,7 @@ export default function AdminPage() {
         {([
           { id: 'students' as AdminTab, label: '👥 Студенты' },
           { id: 'access' as AdminTab, label: '📚 Группы' },
+          { id: 'lessons' as AdminTab, label: '🗓 Занятия' },
           { id: 'settings' as AdminTab, label: '⚙️ Настройки' },
         ]).map(tab => {
           const active = adminTab === tab.id;
@@ -3967,6 +3969,10 @@ export default function AdminPage() {
 
         {adminTab === 'access' && secret && (
           <AdminGroupAccessTab secret={secret} showToast={showToast} />
+        )}
+
+        {adminTab === 'lessons' && secret && (
+          <AdminCurriculumTab secret={secret} showToast={showToast} />
         )}
 
         {adminTab === 'students' && (<>
