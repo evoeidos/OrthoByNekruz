@@ -3,11 +3,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  ArrowLeft, ArrowRight, CalendarDays, CheckCircle2, ChevronRight, Circle,
-  GraduationCap, Target, X,
+  ArrowLeft, ArrowRight, BookOpen, CalendarDays, CheckCircle2, ChevronRight,
+  Circle, GraduationCap, Target, X,
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { Lecture, Lesson, LessonKind } from '@/lib/curriculum';
+import type { Lecture, Lesson, LessonKind, LessonSection } from '@/lib/curriculum';
 
 // Локальная копия подписей: импорт значения из curriculum притащил бы в
 // клиентский бандл все планы кафедр из файлов.
@@ -385,13 +385,32 @@ function ReadingView({
   const { lesson } = item;
   const isControl = lesson.kind !== 'lesson';
   const [fontSize, setFontSize] = useState(16);
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set());
   const initialDistance = useRef<number | null>(null);
   const initialFontSize = useRef(16);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
+    const first = lesson.sections?.[0]?.id;
+    setOpenSections(first ? new Set([first]) : new Set());
   }, [lesson.id]);
+
+  const sections = lesson.sections ?? [];
+  const termCount = useMemo(
+    () => sections.reduce((n, s) => n + (s.terms?.length ?? 0), 0),
+    [sections],
+  );
+  const allOpen = sections.length > 0 && openSections.size === sections.length;
+
+  const toggleSection = (id: string) => {
+    setOpenSections(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
@@ -510,6 +529,47 @@ function ReadingView({
             </div>
           )}
 
+          {sections.length > 0 && (
+            <>
+              <div
+                className="flex items-center gap-2"
+                style={{ borderTop: '1px solid var(--c-border)', paddingTop: 12 }}
+              >
+                <BookOpen className="w-4 h-4 flex-shrink-0" style={{ color: accent }} />
+                <span
+                  className="flex-1 text-[11px] font-bold uppercase tracking-widest"
+                  style={{ color: accent }}
+                >
+                  Разбор темы · {sections.length}
+                  {termCount ? ` · ${termCount} терминов` : ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setOpenSections(
+                    allOpen ? new Set() : new Set(sections.map(s => s.id)),
+                  )}
+                  className="text-[11px] font-semibold px-2 py-1 rounded-lg"
+                  style={{ color: 'var(--c-muted)', border: '1px solid var(--c-border)' }}
+                >
+                  {allOpen ? 'Свернуть' : 'Развернуть всё'}
+                </button>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {sections.map((section, i) => (
+                  <SectionAccordion
+                    key={section.id}
+                    section={section}
+                    index={i + 1}
+                    accent={accent}
+                    fontSize={fontSize}
+                    open={openSections.has(section.id)}
+                    onToggle={() => toggleSection(section.id)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
           {lesson.objectives?.length ? (
             <>
               <div
@@ -593,7 +653,7 @@ function ReadingView({
             </>
           )}
 
-          {lesson.terms?.length ? (
+          {!sections.length && lesson.terms?.length ? (
             <>
               <div
                 className="flex items-center gap-3"
@@ -699,6 +759,117 @@ function ReadingView({
   );
 }
 
+/** Подтема из плана кафедры: заголовок всегда виден, разбор раскрывается. */
+function SectionAccordion({
+  section,
+  index,
+  accent,
+  fontSize,
+  open,
+  onToggle,
+}: {
+  section: LessonSection;
+  index: number;
+  accent: string;
+  fontSize: number;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div
+      className="rounded-2xl overflow-hidden"
+      style={{
+        background: 'var(--c-card)',
+        border: `1px solid ${open
+          ? `color-mix(in srgb, ${accent} 45%, var(--c-border))`
+          : 'var(--c-border)'}`,
+      }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-start gap-2.5 px-3 py-2.5 text-left"
+      >
+        <span
+          className="flex-shrink-0 font-extrabold tabular-nums"
+          style={{ fontSize: `${fontSize * 0.8}px`, color: accent, marginTop: 1 }}
+        >
+          {index}
+        </span>
+        <span
+          className="flex-1 font-semibold leading-snug"
+          style={{ fontSize: `${fontSize * 0.94}px`, color: 'var(--c-text)' }}
+        >
+          {section.title}
+        </span>
+        <ChevronRight
+          className="w-4 h-4 flex-shrink-0 transition-transform"
+          style={{
+            color: open ? accent : 'var(--c-muted)',
+            transform: open ? 'rotate(90deg)' : undefined,
+            marginTop: 2,
+          }}
+        />
+      </button>
+
+      {open && (
+        <div className="px-3 pb-3 pt-0 flex flex-col gap-3">
+          <div
+            className="leading-relaxed break-words"
+            style={{
+              fontSize: `${fontSize * 0.94}px`,
+              color: 'color-mix(in srgb, var(--c-text) 90%, transparent)',
+            }}
+          >
+            {section.text}
+          </div>
+
+          {section.terms?.length ? (
+            <div
+              className="flex flex-col gap-1.5 pt-2.5"
+              style={{ borderTop: '1px solid var(--c-border)' }}
+            >
+              <span
+                className="text-[10px] font-bold uppercase tracking-widest"
+                style={{ color: accent }}
+              >
+                Латынь · {section.terms.length}
+              </span>
+              {section.terms.map(term => {
+                const { ru, la } = splitTerm(term);
+                return (
+                  <div key={term} className="flex flex-col gap-0.5">
+                    <span
+                      className="leading-snug break-words"
+                      style={{
+                        fontSize: `${fontSize * 0.88}px`,
+                        color: 'color-mix(in srgb, var(--c-text) 90%, transparent)',
+                      }}
+                    >
+                      {ru}
+                    </span>
+                    {la && (
+                      <span
+                        className="leading-snug break-words italic"
+                        style={{
+                          fontSize: `${fontSize * 0.84}px`,
+                          color: accent,
+                        }}
+                      >
+                        {la}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Список ────────────────────────────────────────────────────────────────
 
 function LessonRow({
@@ -761,7 +932,7 @@ function LessonRow({
           >
             {lesson.title}
           </span>
-          {isControl && (
+          {isControl ? (
             <span
               className="inline-block text-[10.5px] font-bold mt-1 px-1.5 py-0.5 rounded"
               style={{
@@ -772,7 +943,14 @@ function LessonRow({
               {KIND_LABELS[lesson.kind]}
               {lesson.covers?.length ? ` · темы ${formatCovers(lesson.covers)}` : ''}
             </span>
-          )}
+          ) : lesson.sections?.length ? (
+            <span
+              className="block text-[10.5px] mt-0.5"
+              style={{ color: 'var(--c-muted)' }}
+            >
+              {lesson.sections.length} {pluralSections(lesson.sections.length)}
+            </span>
+          ) : null}
         </span>
         <ChevronRight
           className="w-4 h-4 flex-shrink-0"
@@ -874,6 +1052,23 @@ function EmptyState({
       )}
     </div>
   );
+}
+
+function pluralSections(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'подтема';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'подтемы';
+  return 'подтем';
+}
+
+/** «Нижний альвеолярный нерв — nervus alveolaris inferior» → русская и латинская строки. */
+function splitTerm(term: string): { ru: string; la: string | null } {
+  const i = term.indexOf(' — ');
+  if (i < 0) return { ru: term, la: null };
+  const ru = term.slice(0, i).trim();
+  const la = term.slice(i + 3).trim();
+  return { ru, la: la || null };
 }
 
 /** [31,32,33,34] → «31–34», [1,2,3,5,6] → «1–3, 5, 6» */

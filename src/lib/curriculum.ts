@@ -38,6 +38,18 @@ export const LESSON_KIND_LABELS: Record<LessonKind, string> = {
   colloquium: 'Коллоквиум',
 };
 
+/**
+ * Подтема занятия — один пункт из перечня, который кафедра даёт под темой.
+ * Каждая раскрывается отдельно, поэтому текст пишется самодостаточным: разбор
+ * подтемы и латинские названия структур, которые в ней разбирают.
+ */
+export interface LessonSection {
+  id: string;
+  title: string;
+  text: string;
+  terms?: string[];
+}
+
 export interface Lesson {
   id: string;
   /** Позиция в плане курса, начиная с 1 */
@@ -57,7 +69,9 @@ export interface Lesson {
   summary?: string;
   /** Что нужно уметь к паре — короткие пункты */
   objectives?: string[];
-  /** Термины занятия для карточек и «верно/неверно» */
+  /** Подтемы из плана кафедры с разбором каждой */
+  sections?: LessonSection[];
+  /** Термины занятия — если подтем нет; иначе термины лежат в подтемах */
   terms?: string[];
   /** Для контрольной и коллоквиума: номера занятий, которые входят в блок */
   covers?: number[];
@@ -127,6 +141,25 @@ function normalizeCovers(raw: unknown): number[] | undefined {
   return out.length ? out : undefined;
 }
 
+function normalizeSections(raw: unknown): LessonSection[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: LessonSection[] = [];
+  raw.slice(0, 32).forEach((item, i) => {
+    if (!item || typeof item !== 'object') return;
+    const r = item as Record<string, unknown>;
+    const title = String(r.title ?? '').trim();
+    const text = String(r.text ?? '').trim();
+    if (!title || !text) return;
+    out.push({
+      id: String(r.id ?? '').trim() || `s${i + 1}`,
+      title,
+      text,
+      terms: normalizeStringList(r.terms, 40),
+    });
+  });
+  return out.length ? out : undefined;
+}
+
 export function normalizeLesson(raw: unknown, fallbackOrder: number): Lesson | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
@@ -150,6 +183,7 @@ export function normalizeLesson(raw: unknown, fallbackOrder: number): Lesson | n
     title,
     summary: r.summary ? String(r.summary).trim() : undefined,
     objectives: normalizeStringList(r.objectives),
+    sections: normalizeSections(r.sections),
     terms: normalizeStringList(r.terms, 80),
     covers: kind === 'lesson' ? undefined : normalizeCovers(r.covers),
     hours: Number.isFinite(hours) && hours > 0 ? hours : undefined,
