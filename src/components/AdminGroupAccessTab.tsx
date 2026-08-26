@@ -24,6 +24,7 @@ const FONT_SANS = 'var(--font-sans, system-ui, sans-serif)';
 
 type DurationKind = 'unlimited' | 'hours' | 'days' | 'exam_day';
 type ModuleId = 'questions' | 'tests' | 'tasks' | 'exam' | 'materials';
+type LessonsAccess = 'show' | 'hide';
 
 const CORE_MODULES: PreviewModule[] = ['questions', 'tests', 'tasks'];
 
@@ -66,6 +67,7 @@ interface SubjectState {
   examDate: string | null;
   note: string | null;
   expiresAt: string | null;
+  lessonsRestricted: boolean;
 }
 
 interface GroupNode {
@@ -182,6 +184,7 @@ export default function AdminGroupAccessTab({
   const [rulesScope, setRulesScope] = useState<'course' | 'faculty'>('course');
   const [catalog, setCatalog] = useState<CatalogSubject[]>([]);
   const [bulkModules, setBulkModules] = useState<PreviewModule[]>(['questions', 'tests', 'tasks']);
+  const [bulkLessonsAccess, setBulkLessonsAccess] = useState<LessonsAccess>('show');
 
   const faculty = useMemo(
     () => tree.find(f => f.facultyId === facultyId) ?? null,
@@ -293,6 +296,7 @@ export default function AdminGroupAccessTab({
       durationValue?: number;
       examDate?: string;
       modules?: ModuleId[];
+      lessonsRestricted?: boolean;
     },
   ) => {
     const initData = getTelegramInitData();
@@ -315,6 +319,7 @@ export default function AdminGroupAccessTab({
           durationValue: opts?.durationValue,
           examDate: opts?.examDate,
           modules: opts?.modules ?? ['questions', 'tests', 'tasks'],
+          lessonsRestricted: opts?.lessonsRestricted ?? false,
         }),
       });
       const d = await r.json();
@@ -361,6 +366,7 @@ export default function AdminGroupAccessTab({
             : undefined,
           examDate: bulkDuration === 'exam_day' ? bulkExamDate : undefined,
           modules: bulkModules,
+          lessonsRestricted: bulkLessonsAccess === 'hide',
         }),
       });
       const d = await r.json();
@@ -741,6 +747,30 @@ export default function AdminGroupAccessTab({
               disabled={saving}
             />
           </div>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 6 }}>
+              Вкладка «Занятия»
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {(['show', 'hide'] as LessonsAccess[]).map(v => (
+                <button
+                  key={v}
+                  type="button"
+                  disabled={saving}
+                  onClick={() => setBulkLessonsAccess(v)}
+                  style={{
+                    padding: '5px 12px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                    border: `1px solid ${bulkLessonsAccess === v ? (v === 'hide' ? '#C0392B' : T.accent) : T.border}`,
+                    background: bulkLessonsAccess === v ? (v === 'hide' ? '#FDECEA' : T.accentSoft) : T.surfaceAlt,
+                    color: bulkLessonsAccess === v ? (v === 'hide' ? '#C0392B' : T.accent) : T.textMuted,
+                    cursor: saving ? 'default' : 'pointer',
+                  }}
+                >
+                  {v === 'show' ? '✓ Показать' : '✗ Скрыть'}
+                </button>
+              ))}
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               type="button"
@@ -794,6 +824,7 @@ export default function AdminGroupAccessTab({
                 durationValue: subj.durationValue ?? undefined,
                 examDate: subj.examDate ?? undefined,
                 modules: subj.modules,
+                lessonsRestricted: subj.lessonsRestricted,
               })}
               onSave={(enabled, opts) => void setRule(singleGroup.studyGroup, subj.id, enabled, opts)}
             />
@@ -881,6 +912,7 @@ function SubjectRow({
     durationValue?: number;
     examDate?: string;
     modules: ModuleId[];
+    lessonsRestricted: boolean;
   }) => void;
 }) {
   const [durationKind, setDurationKind] = useState<DurationKind>(subj.durationKind);
@@ -889,6 +921,7 @@ function SubjectRow({
   const [modules, setModules] = useState<PreviewModule[]>(
     subj.modules.filter((m): m is PreviewModule => CORE_MODULES.includes(m as PreviewModule)),
   );
+  const [lessonsRestricted, setLessonsRestricted] = useState(subj.lessonsRestricted);
 
   useEffect(() => {
     setDurationKind(subj.durationKind);
@@ -899,6 +932,7 @@ function SubjectRow({
       [{ id: subj.id, modules: moduleOptions }],
       subj.id,
     ));
+    setLessonsRestricted(subj.lessonsRestricted);
   }, [subj, moduleOptions]);
 
   return (
@@ -940,6 +974,7 @@ function SubjectRow({
               durationValue: durationKind === 'hours' || durationKind === 'days' ? durationValue : undefined,
               examDate: durationKind === 'exam_day' ? examDate : undefined,
               modules,
+              lessonsRestricted,
             })}
             style={{
               padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700,
@@ -966,6 +1001,30 @@ function SubjectRow({
           onChange={setModules}
           disabled={saving}
         />
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 6 }}>
+          Вкладка «Занятия»
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {(['show', 'hide'] as LessonsAccess[]).map(v => (
+            <button
+              key={v}
+              type="button"
+              disabled={saving}
+              onClick={() => setLessonsRestricted(v === 'hide')}
+              style={{
+                padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                border: `1px solid ${(v === 'hide' ? lessonsRestricted : !lessonsRestricted) ? (v === 'hide' ? '#C0392B' : T.accent) : T.border}`,
+                background: (v === 'hide' ? lessonsRestricted : !lessonsRestricted) ? (v === 'hide' ? '#FDECEA' : T.accentSoft) : T.surfaceAlt,
+                color: (v === 'hide' ? lessonsRestricted : !lessonsRestricted) ? (v === 'hide' ? '#C0392B' : T.accent) : T.textMuted,
+                cursor: saving ? 'default' : 'pointer',
+              }}
+            >
+              {v === 'show' ? '✓ Показать' : '✗ Скрыть'}
+            </button>
+          ))}
+        </div>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
         <select
@@ -1002,6 +1061,7 @@ function SubjectRow({
             durationValue: durationKind === 'hours' || durationKind === 'days' ? durationValue : undefined,
             examDate: durationKind === 'exam_day' ? examDate : undefined,
             modules,
+            lessonsRestricted,
           })}
           style={{
             padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 600,

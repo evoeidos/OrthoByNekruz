@@ -44,6 +44,8 @@ export interface GroupAccessRule {
   /** YYYY-MM-DD для exam_day */
   examDate?: string;
   note?: string;
+  /** Если true — вкладка «Занятия» скрыта для этой группы/предмета */
+  lessonsRestricted?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -281,6 +283,10 @@ export function applyGroupAccessToUser(
   }
 
   const matched = rulesForUser(user, rules, nowMs);
+  // Субъекты у которых занятия явно ограничены правилом
+  const lessonsRestrictedSids = new Set(
+    matched.filter(r => r.lessonsRestricted === true).map(r => r.subjectId),
+  );
   const next: Record<string, unknown> = { ...migrateUserSubjects(user) };
   const groupGrants: Record<string, GroupGrantRecord[]> = {
     ...(next.groupGrants as Record<string, GroupGrantRecord[]> || {}),
@@ -328,7 +334,10 @@ export function applyGroupAccessToUser(
     if (active.length > 0) {
       if (subjects[sid] !== true) changed = true;
       subjects[sid] = true;
-      const hidden = buildNavHiddenForModules(sid, active);
+      const hiddenBase = buildNavHiddenForModules(sid, active);
+      const hidden = (lessonsRestrictedSids.has(sid) && !hiddenBase.includes('lessons'))
+        ? [...hiddenBase, 'lessons']
+        : hiddenBase;
       if (hidden.length === 0) delete navHidden[sid];
       else navHidden[sid] = hidden;
       grantedSubjects.push(sid);
@@ -348,7 +357,10 @@ export function applyGroupAccessToUser(
     if (active.length === 0) continue;
     if (subjects[sid] !== true) changed = true;
     subjects[sid] = true;
-    const hidden = buildNavHiddenForModules(sid, active);
+    const hiddenBase = buildNavHiddenForModules(sid, active);
+    const hidden = (lessonsRestrictedSids.has(sid) && !hiddenBase.includes('lessons'))
+      ? [...hiddenBase, 'lessons']
+      : hiddenBase;
     if (hidden.length === 0) delete navHidden[sid];
     else navHidden[sid] = hidden;
     if (!next[`${sid}_grantedAt`]) {
@@ -419,6 +431,7 @@ export function upsertGroupAccessRule(
     durationValue?: number;
     examDate?: string;
     note?: string;
+    lessonsRestricted?: boolean;
   },
 ): GroupAccessRule[] {
   const studyGroup = normalizeStudyGroup(patch.studyGroup);
@@ -437,6 +450,7 @@ export function upsertGroupAccessRule(
     durationValue: patch.durationValue ?? prev?.durationValue,
     examDate: patch.examDate ?? prev?.examDate,
     note: patch.note ?? prev?.note,
+    lessonsRestricted: patch.lessonsRestricted ?? prev?.lessonsRestricted ?? false,
     createdAt: prev?.createdAt ?? now,
     updatedAt: now,
   };
@@ -479,6 +493,7 @@ export function getAdminGroupAccessTree(
             examDate: rule?.examDate ?? null,
             note: rule?.note ?? null,
             expiresAt: rule ? computeRuleExpiresAt(rule) : null,
+            lessonsRestricted: rule?.lessonsRestricted ?? false,
           };
         }),
       })),

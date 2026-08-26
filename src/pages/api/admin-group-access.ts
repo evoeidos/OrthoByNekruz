@@ -90,6 +90,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         : undefined;
       const examDate = req.body.examDate ? String(req.body.examDate) : undefined;
       const modules = normalizeModules(req.body.modules) as GroupAccessModule[];
+      const lessonsRestricted = req.body.lessonsRestricted === true || req.body.lessonsRestricted === 'true';
 
       const next = upsertGroupAccessRule(rules, {
         facultyId,
@@ -101,6 +102,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         durationValue,
         examDate,
         note: req.body.note ? String(req.body.note) : undefined,
+        lessonsRestricted,
       });
       await saveGroupAccessRules(redis, next);
 
@@ -137,6 +139,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const durationValue = req.body.durationValue != null ? Number(req.body.durationValue) : undefined;
       const examDate = req.body.examDate ? String(req.body.examDate) : undefined;
       const modules = normalizeModules(req.body.modules) as GroupAccessModule[];
+      const lessonsRestricted = req.body.lessonsRestricted === true || req.body.lessonsRestricted === 'true';
 
       let next = [...rules];
       for (const studyGroup of studyGroups) {
@@ -149,6 +152,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           durationKind,
           durationValue,
           examDate,
+          lessonsRestricted,
         });
       }
       await saveGroupAccessRules(redis, next);
