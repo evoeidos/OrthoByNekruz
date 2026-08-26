@@ -5,6 +5,9 @@ const GEMINI_MODELS = [
 ] as const;
 
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
+// Timeweb Cloud AI Gateway — DeepSeek V4 Flash (OpenAI-совместимый)
+const TIMEWEB_BASE_URL = 'https://api.timeweb.ai/v1';
+const TIMEWEB_MODEL = 'deepseek/deepseek-v4-flash';
 const MAX_CONTEXT_CHARS = 12_000;
 
 export function buildQuestionAiPrompts(
@@ -13,8 +16,9 @@ export function buildQuestionAiPrompts(
   answer: string,
   userQuestion?: string,
 ) {
-  const systemInstruction = `Ты — ассистент-преподаватель по ортопедической стоматологии и микробиологии.
-Помогаешь студентам понять материал. Отвечай ТОЛЬКО на русском языке.
+  const systemInstruction = `Ты — ассистент-преподаватель медицинского университета (КрасГМУ).
+Помогаешь студентам понять материал по любой медицинской дисциплине.
+Отвечай ТОЛЬКО на русском языке.
 Пиши кратко и понятно. Используй простые аналогии из жизни.
 Форматируй через Markdown: **жирный** для ключевых слов, - для списков.
 Не повторяй вопрос. Максимум 250 слов.`;
@@ -99,25 +103,31 @@ async function callGemini(
   return { text };
 }
 
-async function callGroq(
+/** Единая функция для OpenAI-совместимых провайдеров (Timeweb, Groq и др.) */
+async function callOpenAICompat(
+  baseUrl: string,
   apiKey: string,
+  model: string,
   systemInstruction: string,
   userPrompt: string,
+  providerName: string,
 ): Promise<{ text?: string; error?: string }> {
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: GROQ_MODEL,
+      model,
       messages: [
         { role: 'system', content: systemInstruction },
         { role: 'user', content: userPrompt },
       ],
       temperature: 0.6,
-      max_tokens: 600,
+      // Reasoning-модели (DeepSeek V4 Flash) тратят ~800 токенов на цепочку мыслей
+      // перед ответом — поэтому лимит выше, чем кажется нужным.
+      max_tokens: providerName === 'Timeweb' ? 2000 : 600,
     }),
     cache: 'no-store',
   });
@@ -125,27 +135,45 @@ async function callGroq(
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     const msg = (err as { error?: { message?: string } }).error?.message
-      || `Groq ${response.status}`;
+      || `${providerName} ${response.status}`;
     return { error: msg };
   }
 
   const data = await response.json();
   const text: string = data.choices?.[0]?.message?.content || '';
-  if (!text) return { error: 'Groq вернул пустой ответ' };
+  if (!text) return { error: `${providerName} вернул пустой ответ` };
   return { text };
 }
 
-/** Groq первым (стабильнее), затем Gemini — несколько моделей. */
+/**
+ * Цепочка провайдеров:
+ *   1. Timeweb (DeepSeek V4 Flash) — основной, лучший русский язык
+ *   2. Groq (Llama 3.3 70B)        — бесплатный резерв
+ *   3. Gemini flash                 — крайний резерв
+ */
 export async function generateQuestionAiAnswer(
   systemInstruction: string,
   userPrompt: string,
 ): Promise<{ result?: string; error?: string }> {
-  const groqKey = process.env.GROQ_API_KEY?.trim();
-  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  const timewebKey = process.env.TIMEWEB_AI_KEY?.trim();
+  const groqKey    = process.env.GROQ_API_KEY?.trim();
+  const geminiKey  = process.env.GEMINI_API_KEY?.trim();
   const errors: string[] = [];
 
+  if (timewebKey) {
+    const tw = await callOpenAICompat(
+      TIMEWEB_BASE_URL, timewebKey, TIMEWEB_MODEL,
+      systemInstruction, userPrompt, 'Timeweb',
+    );
+    if (tw.text) return { result: tw.text };
+    if (tw.error) errors.push(tw.error);
+  }
+
   if (groqKey) {
-    const groq = await callGroq(groqKey, systemInstruction, userPrompt);
+    const groq = await callOpenAICompat(
+      'https://api.groq.com/openai/v1', groqKey, GROQ_MODEL,
+      systemInstruction, userPrompt, 'Groq',
+    );
     if (groq.text) return { result: groq.text };
     if (groq.error) errors.push(groq.error);
   }
@@ -161,8 +189,8 @@ export async function generateQuestionAiAnswer(
     }
   }
 
-  if (!groqKey && !geminiKey) {
-    return { error: 'ИИ не настроен: добавь GROQ_API_KEY или GEMINI_API_KEY в Vercel' };
+  if (!timewebKey && !groqKey && !geminiKey) {
+    return { error: 'ИИ не настроен: добавь TIMEWEB_AI_KEY в переменные окружения' };
   }
 
   const last = errors[errors.length - 1] || 'Все провайдеры недоступны';
