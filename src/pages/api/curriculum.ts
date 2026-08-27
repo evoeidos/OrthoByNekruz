@@ -73,9 +73,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const facultyId = String(user.facultyId || '') || facultyFromStudyGroup(studyGroup);
 
     const byId = new Map<string, Program>();
-    for (const p of programsForGroup(groupMap, studyGroup, allPrograms)) {
+
+    // Программы, явно назначенные группе
+    const directPrograms = programsForGroup(groupMap, studyGroup, allPrograms);
+    for (const p of directPrograms) {
       byId.set(p.id, p);
     }
+
+    // Если группе назначена хотя бы одна программа по предмету,
+    // добавляем все курсы того же предмета + факультета
+    // (чтобы педиатры видели и 1, и 2 курс анатомии автоматически).
+    const directKeys = new Set(directPrograms.map(p => `${p.facultyId}:${p.subjectId}`));
+    for (const p of allPrograms) {
+      if (directKeys.has(`${p.facultyId}:${p.subjectId}`)) {
+        byId.set(p.id, p);
+      }
+    }
+
+    // Программы по купленным / выданным группой предметам
     for (const p of allPrograms) {
       if (p.facultyId === facultyId && userHasSubject(user, p.subjectId)) {
         byId.set(p.id, p);
