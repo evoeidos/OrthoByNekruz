@@ -711,7 +711,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const subjectId = String(subject || '').trim();
         const sectionId = String(section || '').trim();
         const enabled   = enable === true || enable === 'true' || enable === '1';
-        const ALLOWED_SECTIONS = ['questions', 'tests', 'tasks', 'exam', 'materials'];
+        const ALLOWED_SECTIONS = ['lessons', 'questions', 'tests', 'tasks', 'exam', 'materials'];
         if (!subjectId || !ALLOWED_SECTIONS.includes(sectionId)) {
           return res.status(400).json({ error: 'Bad subject/section' });
         }
