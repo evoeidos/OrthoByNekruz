@@ -74,24 +74,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const byId = new Map<string, Program>();
 
-    // Программы, явно назначенные группе
+    // Определяем предметы, доступные группе через прямое назначение (любой факультет).
     const directPrograms = programsForGroup(groupMap, studyGroup, allPrograms);
-    for (const p of directPrograms) {
-      byId.set(p.id, p);
-    }
+    const accessibleSubjectIds = new Set(directPrograms.map(p => p.subjectId));
 
-    // Если группе назначена программа по предмету для факультета пользователя,
-    // автоматически добавляем ВСЕ курсы того же предмета + факультета пользователя.
-    // Расширяем только по своему факультету, чтобы не показывать чужие программы.
-    const directSubjectIds = new Set(
-      directPrograms
-        .filter(p => p.facultyId === facultyId)
-        .map(p => p.subjectId),
-    );
+    // Для каждого доступного предмета показываем программы СВОЕГО факультета (все курсы).
+    // Это гарантирует, что педиатры видят педиатрический контент, даже если им
+    // случайно назначили стоматологическую программу по той же дисциплине.
     for (const p of allPrograms) {
-      if (p.facultyId === facultyId && directSubjectIds.has(p.subjectId)) {
+      if (p.facultyId === facultyId && accessibleSubjectIds.has(p.subjectId)) {
         byId.set(p.id, p);
       }
+    }
+
+    // Fallback: если для предмета нет программы своего факультета — показываем
+    // назначенную напрямую (например, когда дисциплина ведётся смешанным потоком).
+    for (const p of directPrograms) {
+      const ownFacultyExists = [...byId.values()].some(
+        b => b.facultyId === facultyId && b.subjectId === p.subjectId,
+      );
+      if (!ownFacultyExists) byId.set(p.id, p);
     }
 
     // Программы по купленным / выданным группой предметам
