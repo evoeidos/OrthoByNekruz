@@ -80,12 +80,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       byId.set(p.id, p);
     }
 
-    // Если группе назначена хотя бы одна программа по предмету,
-    // добавляем все курсы того же предмета + факультета
-    // (чтобы педиатры видели и 1, и 2 курс анатомии автоматически).
-    const directKeys = new Set(directPrograms.map(p => `${p.facultyId}:${p.subjectId}`));
+    // Если группе назначена программа по предмету для факультета пользователя,
+    // автоматически добавляем ВСЕ курсы того же предмета + факультета пользователя.
+    // Расширяем только по своему факультету, чтобы не показывать чужие программы.
+    const directSubjectIds = new Set(
+      directPrograms
+        .filter(p => p.facultyId === facultyId)
+        .map(p => p.subjectId),
+    );
     for (const p of allPrograms) {
-      if (directKeys.has(`${p.facultyId}:${p.subjectId}`)) {
+      if (p.facultyId === facultyId && directSubjectIds.has(p.subjectId)) {
         byId.set(p.id, p);
       }
     }
