@@ -98,6 +98,7 @@ type PreviewCatalogBaseEntry = {
 // Управляемые из админки разделы. Сам раздел «Статистика» не выключается
 // (там прогресс юзера), но внутри него можно скрыть блок «Проверка готовности».
 const NAV_SECTIONS: { id: string; label: string }[] = [
+  { id: 'lessons',   label: 'Занятия'             },
   { id: 'questions', label: 'Вопросы'             },
   { id: 'tests',     label: 'Тесты'               },
   { id: 'tasks',     label: 'Задачи'              },
