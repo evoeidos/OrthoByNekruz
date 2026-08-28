@@ -28,7 +28,7 @@ import {
 import { applyGroupAccessToUser, loadGroupAccessRules } from '@/lib/groupAccess';
 import type { PreviewModule } from '@/lib/previewModules';
 import { clearAuthRateLimitsForTgId } from '@/lib/authRateLimit';
-import { verifyInitDataUser } from '@/lib/verifyInitData';
+import { verifyAdminRequest } from '@/lib/adminAuth';
 import { getAllUserIds, registerUserId, removeUserId } from '@/lib/userIndex';
 import { isValidTelegramUsername, normalizeTelegramUsername } from '@/lib/tgLinks';
 import { resolveLastActivityIso } from '@/lib/userActivity';
@@ -42,14 +42,6 @@ const PAGE_SIZE    = 50;
 
 type ListFilter = 'all' | 'blocked' | 'suspicious' | 'demo' | 'unpaid';
 type ListSort   = 'registered' | 'lastActivity' | 'lastLogin' | 'loginCount';
-
-function verifyAdmin(initData: string, secret: string): boolean {
-  if (!ADMIN_SECRET || secret !== ADMIN_SECRET) return false;
-  if (!BOT_TOKEN) return false;
-  const tgUser = verifyInitDataUser(initData, BOT_TOKEN);
-  if (!tgUser || String(tgUser.id) !== ADMIN_TG_ID) return false;
-  return true;
-}
 
 function ensureSubjects(user: any): any {
   return migrateUserSubjects(user);
@@ -279,13 +271,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'POST') return res.status(405).end();
 
   const {
-    initData, secret, action, tgId, subject, enable, reason, section, contactUsername: contactUsernameRaw,
+    action, tgId, subject, enable, reason, section, contactUsername: contactUsernameRaw,
     page, limit, filter, q, sortBy, sortDir,
   } = req.body ?? {};
 
-  if (!initData || !secret || !verifyAdmin(String(initData), String(secret))) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
+  const auth = verifyAdminRequest(req);
+  if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
 
   try {
     if (action === 'gift_bio_tasks') {

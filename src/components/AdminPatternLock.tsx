@@ -222,4 +222,13 @@ export function AdminPatternLock({
 }
 
 export const ADMIN_PATTERN = [2, 4, 5, 8, 6] as const;
-export const ADMIN_UNLOCK_SECRET = 'ortho2000secret';
+
+// ВНИМАНИЕ: это НЕ граница безопасности.
+// Значение попадает в клиентский бандл, поэтому любой может его извлечь.
+// Реальная проверка прав админа — на сервере (src/lib/adminAuth.ts):
+// подпись Telegram initData + совпадение user.id с ADMIN_TG_ID.
+// Графический ключ и этот секрет — только UX-гейт от случайного захода.
+// Значение должно совпадать с серверным ADMIN_SECRET; задаётся через env,
+// чтобы можно было ротировать без правки кода.
+export const ADMIN_UNLOCK_SECRET =
+  process.env.NEXT_PUBLIC_ADMIN_SECRET || 'ortho2000secret';

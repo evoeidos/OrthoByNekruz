@@ -548,6 +548,5 @@ export function getAllDataFileNames(): string[] {
   names.add(BIO_TASKS_PED_FILE);
   names.add(BIO_TASKS_THERAPEUTIC_FILE);
   names.add(CHEM_TASKS_FILE);
-  names.add('bio_questions.json');
   return [...names];
 }

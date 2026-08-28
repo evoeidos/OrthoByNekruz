@@ -1310,7 +1310,7 @@ export const TestsTab = ({
           paddingTop: 'calc(var(--header-pt) + 20px)',
         }}>
         <button onClick={() => { setTestSettingsOpen(false); resetTest(); setSelectedBlock(null); }}
-          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 active:scale-95"
+          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 active:scale-95 relative before:absolute before:-inset-1.5 before:content-['']"
           style={{ background: 'transparent', border: '1px solid var(--c-border)', color: 'var(--c-muted)' }}>
           <ChevronLeft className="w-4 h-4" />
         </button>
@@ -1335,7 +1335,7 @@ export const TestsTab = ({
               </span>
               <button
                 onClick={() => currentTest && toggleFavorite(currentTest)}
-                className="w-7 h-7 flex items-center justify-center rounded-lg transition-all active:scale-90"
+                className="w-7 h-7 flex items-center justify-center rounded-lg transition-all active:scale-90 relative before:absolute before:-inset-2 before:content-['']"
                 style={{ background: isFavorite(currentTest) ? 'color-mix(in srgb, var(--c-amber) 18%, transparent)' : 'var(--c-card)', border: '1px solid var(--c-border)' }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill={isFavorite(currentTest) ? 'var(--c-amber)' : 'none'} stroke={isFavorite(currentTest) ? 'var(--c-amber)' : 'var(--c-muted)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />

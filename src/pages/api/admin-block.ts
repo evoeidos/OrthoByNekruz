@@ -1,19 +1,18 @@
 // pages/api/admin-block.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
+import { verifyAdminRequest } from '@/lib/adminAuth';
 
 const redis        = createRedisFromEnv();
-const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
-    const { tgId, action, secret } = req.body;
+    const { tgId, action } = req.body;
 
-    if (!ADMIN_SECRET || secret !== ADMIN_SECRET) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    const auth = verifyAdminRequest(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
     if (!tgId) return res.status(400).json({ error: 'tgId required' });
 
     let user: any = await redis.get(`user_id:${tgId}`);

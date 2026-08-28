@@ -10,6 +10,34 @@ const TIMEWEB_BASE_URL = 'https://api.timeweb.ai/v1';
 const TIMEWEB_MODEL = 'deepseek/deepseek-v4-flash';
 const MAX_CONTEXT_CHARS = 12_000;
 
+/**
+ * Таймауты. Без них зависший провайдер держал бы serverless-функцию до
+ * платформенного лимита, а цепочка из 5 вызовов подряд — тем более.
+ * TOTAL_BUDGET_MS ограничивает всю цепочку целиком.
+ */
+const TIMEWEB_TIMEOUT_MS = 25_000; // reasoning-модель, отвечает дольше
+const PROVIDER_TIMEOUT_MS = 15_000;
+const TOTAL_BUDGET_MS = 50_000;
+
+/** fetch с жёстким таймаутом — иначе запрос может висеть бесконечно. */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isAbortError(e: unknown): boolean {
+  return e instanceof Error && (e.name === 'AbortError' || e.name === 'TimeoutError');
+}
+
 export function buildQuestionAiPrompts(
   mode: string,
   question: string,
@@ -74,24 +102,30 @@ async function callGemini(
   model: string,
   systemInstruction: string,
   userPrompt: string,
+  timeoutMs: number,
 ): Promise<{ text?: string; error?: string }> {
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemInstruction }] },
-      contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-      generationConfig: {
-        temperature: 0.6,
-        maxOutputTokens: 600,
-        topP: 0.9,
-      },
-    }),
-    cache: 'no-store',
-  });
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+        generationConfig: {
+          temperature: 0.6,
+          maxOutputTokens: 600,
+          topP: 0.9,
+        },
+      }),
+      cache: 'no-store',
+    }, timeoutMs);
+  } catch (e) {
+    return { error: isAbortError(e) ? `${model}: таймаут` : `${model}: сеть недоступна` };
+  }
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
@@ -114,26 +148,36 @@ async function callOpenAICompat(
   systemInstruction: string,
   userPrompt: string,
   providerName: string,
+  timeoutMs: number,
 ): Promise<{ text?: string; error?: string }> {
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemInstruction },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.6,
-      // Reasoning-модели (DeepSeek V4 Flash) тратят ~800 токенов на цепочку мыслей
-      // перед ответом — поэтому лимит выше, чем кажется нужным.
-      max_tokens: providerName === 'Timeweb' ? 2000 : 600,
-    }),
-    cache: 'no-store',
-  });
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.6,
+        // Reasoning-модели (DeepSeek V4 Flash) тратят ~800 токенов на цепочку мыслей
+        // перед ответом — поэтому лимит выше, чем кажется нужным.
+        max_tokens: providerName === 'Timeweb' ? 2000 : 600,
+      }),
+      cache: 'no-store',
+    }, timeoutMs);
+  } catch (e) {
+    return {
+      error: isAbortError(e)
+        ? `${providerName}: таймаут`
+        : `${providerName}: сеть недоступна`,
+    };
+  }
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
@@ -163,19 +207,25 @@ export async function generateQuestionAiAnswer(
   const geminiKey  = process.env.GEMINI_API_KEY?.trim();
   const errors: string[] = [];
 
-  if (timewebKey) {
+  // Общий бюджет на всю цепочку: каждый следующий провайдер получает
+  // не больше, чем осталось от TOTAL_BUDGET_MS.
+  const startedAt = Date.now();
+  const budgetLeft = () => TOTAL_BUDGET_MS - (Date.now() - startedAt);
+  const slice = (want: number) => Math.min(want, budgetLeft());
+
+  if (timewebKey && budgetLeft() > 1_000) {
     const tw = await callOpenAICompat(
       TIMEWEB_BASE_URL, timewebKey, TIMEWEB_MODEL,
-      systemInstruction, userPrompt, 'Timeweb',
+      systemInstruction, userPrompt, 'Timeweb', slice(TIMEWEB_TIMEOUT_MS),
     );
     if (tw.text) return { result: tw.text };
     if (tw.error) errors.push(tw.error);
   }
 
-  if (groqKey) {
+  if (groqKey && budgetLeft() > 1_000) {
     const groq = await callOpenAICompat(
       'https://api.groq.com/openai/v1', groqKey, GROQ_MODEL,
-      systemInstruction, userPrompt, 'Groq',
+      systemInstruction, userPrompt, 'Groq', slice(PROVIDER_TIMEOUT_MS),
     );
     if (groq.text) return { result: groq.text };
     if (groq.error) errors.push(groq.error);
@@ -183,7 +233,13 @@ export async function generateQuestionAiAnswer(
 
   if (geminiKey) {
     for (const model of GEMINI_MODELS) {
-      const gemini = await callGemini(geminiKey, model, systemInstruction, userPrompt);
+      if (budgetLeft() <= 1_000) {
+        errors.push('Исчерпан общий лимит времени на ответ ИИ');
+        break;
+      }
+      const gemini = await callGemini(
+        geminiKey, model, systemInstruction, userPrompt, slice(PROVIDER_TIMEOUT_MS),
+      );
       if (gemini.text) return { result: gemini.text };
       if (gemini.error) {
         errors.push(`${model}: ${gemini.error}`);

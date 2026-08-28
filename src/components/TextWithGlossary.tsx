@@ -37,18 +37,34 @@ export const TextWithGlossary: React.FC<Props> = ({ text, glossary }) => {
     return found?.definition;
   };
 
+  // Примерные габариты тултипа: max-w-xs (320px) + запас на паддинги.
+  const TOOLTIP_W = 330;
+  const TOOLTIP_H = 200;
+  const EDGE_GAP  = 8;
+
+  /** Держим тултип внутри экрана — иначе у края он уезжает за границу. */
+  const clampToViewport = (x: number, y: number) => {
+    if (typeof window === 'undefined') return { x, y };
+    const maxX = window.innerWidth  - TOOLTIP_W - EDGE_GAP;
+    const maxY = window.innerHeight - TOOLTIP_H - EDGE_GAP;
+    return {
+      x: Math.max(EDGE_GAP, Math.min(x + 10, Math.max(EDGE_GAP, maxX))),
+      y: Math.max(EDGE_GAP, Math.min(y + 10, Math.max(EDGE_GAP, maxY))),
+    };
+  };
+
   const handleTermClick = (e: React.MouseEvent, word: string) => {
     e.stopPropagation();
     const def = findDefinition(word);
     if (def) {
       setActiveWord(word);
-      setTooltipPos({ x: e.clientX, y: e.clientY });
+      setTooltipPos(clampToViewport(e.clientX, e.clientY));
     }
   };
 
   const closeTooltip = () => setActiveWord(null);
 
-  if (!regex) return <p className="whitespace-pre-wrap text-white">{text}</p>;
+  if (!regex) return <p className="whitespace-pre-wrap text-foreground">{text}</p>;
 
   // Разбиваем текст на куски
   const parts: { text: string; isTerm: boolean }[] = [];
@@ -71,12 +87,12 @@ export const TextWithGlossary: React.FC<Props> = ({ text, glossary }) => {
 
   return (
     <div className="relative">
-      <p className="whitespace-pre-wrap text-white">
+      <p className="whitespace-pre-wrap text-foreground">
         {parts.map((part, i) =>
           part.isTerm ? (
             <span
               key={i}
-              className="text-primary underline decoration-dotted cursor-pointer hover:text-primary/80"
+              className="text-primary underline decoration-dotted cursor-pointer active:text-primary/70"
               onClick={(e) => handleTermClick(e, part.text)}
               title="Нажми, чтобы увидеть определение"
             >
@@ -91,11 +107,11 @@ export const TextWithGlossary: React.FC<Props> = ({ text, glossary }) => {
       {/* Тултип с определением */}
       {activeWord && (
         <div
-          className="fixed z-50 bg-card border border-white/10 rounded-2xl p-4 shadow-2xl max-w-xs"
-          style={{ left: tooltipPos.x + 10, top: tooltipPos.y + 10 }}
+          className="fixed z-50 bg-card border border-border rounded-2xl p-4 shadow-2xl max-w-xs"
+          style={{ left: tooltipPos.x, top: tooltipPos.y }}
           onClick={closeTooltip}
         >
-          <h4 className="text-white font-bold mb-1">{activeWord}</h4>
+          <h4 className="text-foreground font-bold mb-1">{activeWord}</h4>
           <p className="text-muted-foreground text-sm">{findDefinition(activeWord)}</p>
           <button
             onClick={closeTooltip}

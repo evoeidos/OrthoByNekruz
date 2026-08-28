@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { buildQuestionAiPrompts, friendlyAiError, generateQuestionAiAnswer } from '@/lib/questionAi';
 import { verifyApiStudyUser } from '@/lib/apiUserAuth';
+import { createRedisFromEnv } from '@/lib/redis';
+import { checkAiRateLimit } from '@/lib/aiRateLimit';
+
+const redis = createRedisFromEnv();
 
 export async function POST(req: Request) {
   let body: {
@@ -22,6 +26,16 @@ export async function POST(req: Request) {
   });
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  // Право на доступ ≠ безлимит: без этого один аккаунт может раскрутить
+  // счёт за Timeweb/Groq/Gemini, крутя эндпоинт в цикле.
+  const limit = await checkAiRateLimit(redis, auth.tgId);
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: limit.error },
+      { status: 429, headers: { 'Retry-After': String(limit.retryAfterSec) } },
+    );
   }
 
   const { mode, question, answer, userQuestion } = body;

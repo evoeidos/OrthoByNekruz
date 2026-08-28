@@ -2,9 +2,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
 import type { Resource } from './resources';
+import { verifyAdminRequest } from '@/lib/adminAuth';
 
 const redis        = createRedisFromEnv();
-const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const BUCKET       = 'materials';
@@ -21,11 +21,10 @@ async function getResources(subjectId: string): Promise<Resource[]> {
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { action, subjectId, resource, resourceId, secret } = req.body;
+  const { action, subjectId, resource, resourceId } = req.body;
 
-  if (!ADMIN_SECRET || secret !== ADMIN_SECRET) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  const auth = verifyAdminRequest(req);
+  if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
   if (!subjectId) return res.status(400).json({ error: 'subjectId required' });
 
   // ── Список ────────────────────────────────────────────────────────────────

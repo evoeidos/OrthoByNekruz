@@ -4,7 +4,8 @@ import { createNativeRedisFromEnv, type NativeRedisClient } from '@/lib/nativeRe
 /** Общий контракт Redis для Upstash REST и Timeweb TCP (ioredis). */
 export type AppRedis = {
   get<T = unknown>(key: string): Promise<T | null>;
-  set(key: string, value: unknown, opts?: { ex?: number }): Promise<unknown>;
+  /** nx: записать только если ключа нет; вернёт null, если ключ уже занят. */
+  set(key: string, value: unknown, opts?: { ex?: number; nx?: boolean }): Promise<unknown>;
   del(...keys: string[]): Promise<number>;
   incr(key: string): Promise<number>;
   expire(key: string, seconds: number): Promise<number>;

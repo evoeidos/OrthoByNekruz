@@ -1239,7 +1239,7 @@ export default function AdminPage() {
       const newValue = !isPaidKeysEnabled;
       const res = await fetch('/api/admin-config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ isPaidKeysEnabled: newValue, initData, secret }),
       });
       if (res.ok) {
@@ -1275,7 +1275,7 @@ export default function AdminPage() {
     try {
       const res = await fetch('/api/admin-config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ previewCatalog: next, initData, secret }),
       });
       if (res.ok) {
@@ -1376,7 +1376,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ action: 'reset_demo', tgId: id, secret, initData }),
       });
       if (r.ok) {
@@ -1406,7 +1406,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ action: 'gift_bio_tasks', secret, initData }),
       });
       const data = await r.json().catch(() => ({}));
@@ -1431,7 +1431,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-faculty-stats', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body:    JSON.stringify({ secret, initData, force }),
       });
       const data = await r.json().catch(() => ({}));
@@ -1454,7 +1454,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-rate-blocks', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body:    JSON.stringify({ action: 'list', secret }),
       });
       if (r.ok) {
@@ -1473,7 +1473,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-rate-blocks', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body:    JSON.stringify({ action: 'clear', tgId, secret }),
       });
       if (r.ok) {
@@ -1494,7 +1494,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-whitelist', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body:    JSON.stringify({ action: 'list', secret }),
       });
       if (r.ok) {
@@ -1513,7 +1513,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-whitelist', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ action: 'list_keys', secret }),
       });
       const data = await r.json();
@@ -1533,7 +1533,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-whitelist', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body:    JSON.stringify({ action: 'add', tgId: id, secret }),
       });
       if (r.ok) {
@@ -1555,7 +1555,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-whitelist', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body:    JSON.stringify({ action: 'remove', tgId: id, secret }),
       });
       if (r.ok) {
@@ -1576,7 +1576,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-resources', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ action: 'list', subjectId: subjId, secret }),
       });
       if (r.ok) { const d = await r.json(); setResMgrList(d.resources ?? []); }
@@ -1592,7 +1592,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-resources', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ action: 'add', subjectId: resMgrSubject, resource: resForm, secret }),
       });
       if (r.ok) {
@@ -1610,7 +1610,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-resources', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ action: 'delete', subjectId: resMgrSubject, resourceId, secret }),
       });
       if (r.ok) {
@@ -1628,9 +1628,10 @@ export default function AdminPage() {
     const uploadRes = await fetch('/api/admin-upload', {
       method: 'POST',
       headers: {
-        'Content-Type':   file.type || 'application/octet-stream',
-        'X-Admin-Secret': secret,
-        'X-Filename':     encodeURIComponent(file.name),
+        'Content-Type':        file.type || 'application/octet-stream',
+        'X-Admin-Secret':      secret,
+        'X-Telegram-Init-Data': getTelegramInitData(),
+        'X-Filename':          encodeURIComponent(file.name),
       },
       body: file,
     });
@@ -1668,7 +1669,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-related-terms', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ action: 'load_items', subjectId: subjId, type: typeVal, secret }),
       });
       if (r.ok) { const d = await r.json(); setRtItems(d.items ?? []); }
@@ -1682,7 +1683,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-related-terms', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ action: 'set_terms', subjectId: subjId, type: typeVal, itemId, terms, secret }),
       });
       if (r.ok) {
@@ -1700,7 +1701,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-cache-bust', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ secret }),
       });
       if (r.ok) { showToast('✓ Кэш сброшен — все получат свежие данные в течение 5 мин'); }
@@ -1716,7 +1717,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-glossary', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ action: 'list', subjectId: subjId, secret }),
       });
       if (r.ok) { const d = await r.json(); setGlEntries(d.entries ?? []); }
@@ -1733,7 +1734,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-glossary', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ action: 'add', subjectId: glSubject, entry: glForm, secret }),
       });
       if (r.ok) {
@@ -1751,7 +1752,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-glossary', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ action: 'delete', subjectId: glSubject, entryId, secret }),
       });
       if (r.ok) { const d = await r.json(); setGlEntries(d.entries ?? []); showToast('Удалено'); }
@@ -1765,7 +1766,7 @@ export default function AdminPage() {
     try {
       const signRes = await fetch('/api/admin-upload-sign', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body: JSON.stringify({ secret, filename: file.name, contentType: file.type || 'image/jpeg' }),
       });
 
@@ -1838,7 +1839,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-users', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body:    JSON.stringify({ secret: s, initData, action: 'get_user', tgId }),
       });
       if (!r.ok) return;
@@ -1891,7 +1892,7 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin-users', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body:    JSON.stringify({
           secret: s,
           initData,
@@ -1934,7 +1935,7 @@ export default function AdminPage() {
       if (!bg) {
         fetch('/api/admin-rate-blocks', {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
           body:    JSON.stringify({ action: 'list', secret: s }),
         })
           .then(res => res.ok ? res.json() : null)
@@ -2042,7 +2043,7 @@ export default function AdminPage() {
 
       const r = await fetch('/api/admin-users', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
         body:    JSON.stringify(body),
       });
 

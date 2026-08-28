@@ -3,6 +3,7 @@ import { createRedisFromEnv } from '@/lib/redis';
 import { getTelegramApiBase, tgCall } from '@/lib/telegramApi';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
+const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || '';
 const ADMIN_TG_ID = process.env.ADMIN_TG_ID;
 const APP_URL = process.env.APP_URL || 'https://nekruz2000n-eng-orthobynekruz-a9a4.twc1.net';
 const ADMIN_URL = process.env.ADMIN_URL || `${APP_URL}/admin`;
@@ -65,9 +66,44 @@ export async function GET(req: Request) {
   return NextResponse.json(out);
 }
 
+/**
+ * Апдейт уже обработан? Telegram ретраит доставку при таймауте/сетевом сбое,
+ * без дедупликации мы повторно выполним команду и пошлём сообщение дважды.
+ * Ключ живёт час — этого с запасом хватает на все ретраи Telegram.
+ */
+async function isDuplicateUpdate(updateId: unknown): Promise<boolean> {
+  if (typeof updateId !== 'number') return false;
+  const redis = getRedis();
+  if (!redis) return false;
+  try {
+    // set(..., { nx: true }) вернёт null, если ключ уже существует.
+    const stored = await redis.set(`tg_update:${updateId}`, 1, { ex: 3600, nx: true });
+    return stored === null;
+  } catch (e) {
+    console.error('[bot] dedup check failed', e);
+    return false;
+  }
+}
+
 export async function POST(req: Request) {
   try {
+    // Проверка секрета вебхука. Включается автоматически, как только задан
+    // TELEGRAM_WEBHOOK_SECRET и вебхук перерегистрирован scripts/set-webhook.mjs.
+    if (WEBHOOK_SECRET) {
+      const provided = req.headers.get('x-telegram-bot-api-secret-token');
+      if (provided !== WEBHOOK_SECRET) {
+        console.warn('[bot] отклонён запрос с неверным secret token');
+        return NextResponse.json({ ok: false }, { status: 401 });
+      }
+    } else {
+      console.warn('[bot] TELEGRAM_WEBHOOK_SECRET не задан — вебхук не защищён');
+    }
+
     const update = await req.json();
+
+    if (await isDuplicateUpdate(update?.update_id)) {
+      return NextResponse.json({ ok: true, duplicate: true });
+    }
 
     const chatMember = update?.chat_member ?? update?.my_chat_member;
     if (chatMember) {

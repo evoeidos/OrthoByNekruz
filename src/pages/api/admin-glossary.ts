@@ -3,9 +3,9 @@
 // При запросе type='glossary' в subject-data.ts эти записи мёржатся с JSON-файлом.
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
+import { verifyAdminRequest } from '@/lib/adminAuth';
 
 const redis        = createRedisFromEnv();
-const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 
 export interface GlossaryEntry {
   id:          string;
@@ -30,11 +30,10 @@ async function getEntries(subjectId: string): Promise<GlossaryEntry[]> {
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { action, subjectId, entry, entryId, secret } = req.body ?? {};
+  const { action, subjectId, entry, entryId } = req.body ?? {};
 
-  if (!ADMIN_SECRET || secret !== ADMIN_SECRET) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  const auth = verifyAdminRequest(req);
+  if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
   if (!subjectId) return res.status(400).json({ error: 'subjectId required' });
 
   if (action === 'list') {

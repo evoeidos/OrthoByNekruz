@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { verifyAdminRequest } from '@/lib/adminAuth';
 
-const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const BUCKET       = 'materials'; // строчные — точно как имя бакета в Supabase
@@ -8,9 +8,10 @@ const BUCKET       = 'materials'; // строчные — точно как им
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { secret, filename, contentType } = req.body ?? {};
+  const { filename, contentType } = req.body ?? {};
 
-  if (!secret || String(secret) !== ADMIN_SECRET) return res.status(403).json({ error: 'Forbidden' });
+  const auth = verifyAdminRequest(req);
+  if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
   if (!filename || !contentType) return res.status(400).json({ error: 'Missing params' });
   if (!SUPABASE_URL || !SERVICE_KEY) {
     return res.status(500).json({ error: 'Supabase not configured' });

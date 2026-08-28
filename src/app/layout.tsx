@@ -36,8 +36,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           (function() {
             var theme = localStorage.getItem('theme');
             if (!theme || !['dark','light','bright'].includes(theme)) {
-              theme = 'dark';
-              localStorage.setItem('theme', 'dark');
+              // Первый запуск: берём тему из Telegram, чтобы приложение не
+              // открывалось тёмным у студента со светлым клиентом.
+              // Дальше выбор пользователя из localStorage имеет приоритет.
+              var tgScheme = null;
+              try {
+                tgScheme = window.Telegram
+                  && window.Telegram.WebApp
+                  && window.Telegram.WebApp.colorScheme;
+              } catch(e) {}
+              theme = tgScheme === 'light' ? 'light' : 'dark';
+              localStorage.setItem('theme', theme);
             }
             var root = document.documentElement;
             root.classList.remove('dark', 'bright');

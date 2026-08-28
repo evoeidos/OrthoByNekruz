@@ -1,6 +1,6 @@
 import Redis from 'ioredis';
 
-type SetOpts = { ex?: number };
+type SetOpts = { ex?: number; nx?: boolean };
 
 function serialize(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -33,10 +33,17 @@ export class NativeRedisClient {
     return deserialize(raw) as T | null;
   }
 
+  /** nx: записать только если ключа ещё нет — вернёт null, если ключ занят. */
   async set(key: string, value: unknown, opts?: SetOpts): Promise<'OK' | null> {
     const payload = serialize(value);
+    if (opts?.ex && opts?.nx) {
+      return this.client.set(key, payload, 'EX', opts.ex, 'NX');
+    }
     if (opts?.ex) {
       return this.client.set(key, payload, 'EX', opts.ex);
+    }
+    if (opts?.nx) {
+      return this.client.set(key, payload, 'NX');
     }
     return this.client.set(key, payload);
   }
