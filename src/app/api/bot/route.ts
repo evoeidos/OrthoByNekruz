@@ -77,7 +77,14 @@ async function isDuplicateUpdate(updateId: unknown): Promise<boolean> {
   if (!redis) return false;
   try {
     // set(..., { nx: true }) вернёт null, если ключ уже существует.
-    const stored = await redis.set(`tg_update:${updateId}`, 1, { ex: 3600, nx: true });
+    // Таймаут обязателен: раньше /start Redis не трогал, а зависание
+    // подключения убивает весь вебхук — Telegram не дождётся ответа.
+    const stored = await Promise.race([
+      redis.set(`tg_update:${updateId}`, 1, { ex: 3600, nx: true }),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('dedup timeout')), 800);
+      }),
+    ]);
     return stored === null;
   } catch (e) {
     console.error('[bot] dedup check failed', e);
@@ -87,16 +94,18 @@ async function isDuplicateUpdate(updateId: unknown): Promise<boolean> {
 
 export async function POST(req: Request) {
   try {
-    // Проверка секрета вебхука. Включается автоматически, как только задан
-    // TELEGRAM_WEBHOOK_SECRET и вебхук перерегистрирован scripts/set-webhook.mjs.
+    // Секрет отклоняет запрос только если заголовок ПРИШЁЛ и он неверный.
+    // Если секрета нет в env или прокси/старый вебхук не шлёт заголовок —
+    // пропускаем: иначе /start молчит, пока вебхук не перерегистрируют.
     if (WEBHOOK_SECRET) {
       const provided = req.headers.get('x-telegram-bot-api-secret-token');
-      if (provided !== WEBHOOK_SECRET) {
+      if (provided && provided !== WEBHOOK_SECRET) {
         console.warn('[bot] отклонён запрос с неверным secret token');
         return NextResponse.json({ ok: false }, { status: 401 });
       }
-    } else {
-      console.warn('[bot] TELEGRAM_WEBHOOK_SECRET не задан — вебхук не защищён');
+      if (!provided) {
+        console.warn('[bot] webhook secret задан, но заголовок отсутствует — пропускаем');
+      }
     }
 
     const update = await req.json();
