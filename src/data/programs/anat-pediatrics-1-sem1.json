@@ -59,6 +59,7 @@
         "images": [
           "/images/anat/ped/l1/s3-vertebra.png"
         ],
+        "atlas": "vertebra",
         "terms": [
           "Тело позвонка — corpus vertebrae",
           "Дуга позвонка — arcus vertebrae",
