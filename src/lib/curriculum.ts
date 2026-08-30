@@ -339,17 +339,45 @@ function seedProgramById(programId: string): Program | null {
   return seedPrograms().find(p => p.id === programId) ?? null;
 }
 
+function mergeSectionImages(stored: LessonSection, seed?: LessonSection): LessonSection {
+  if (!seed) return stored;
+  return {
+    ...stored,
+    images: stored.images?.length ? stored.images : seed.images,
+  };
+}
+
+function mergeLessonFromSeed(stored: Lesson, seed?: Lesson): Lesson {
+  if (!seed) return stored;
+  const seedSections = new Map((seed.sections ?? []).map(s => [s.id, s]));
+  const sections = stored.sections?.length
+    ? stored.sections.map(s => mergeSectionImages(s, seedSections.get(s.id)))
+    : seed.sections;
+  return { ...stored, sections };
+}
+
 /**
- * Копия в Redis перекрывает файлы проекта целиком. Если в админке сохранили
- * только лекции (или пустой список занятий), 3 семестр пропадает у всех.
- * Пустые блоки добираем из seed.
+ * Копия в Redis перекрывает файлы проекта. Недостающие занятия и новые
+ * картинки из seed добираем, чтобы тема 1 со схемами не вытесняла остальные.
  */
 function hydrateFromSeed(stored: Program): Program {
   const seed = seedProgramById(stored.id);
   if (!seed) return stored;
+
+  const seedById = new Map(seed.lessons.map(l => [l.id, l]));
+  const storedIds = new Set(stored.lessons.map(l => l.id));
+  const merged = [
+    ...stored.lessons.map(l => mergeLessonFromSeed(l, seedById.get(l.id))),
+    ...seed.lessons.filter(l => !storedIds.has(l.id)),
+  ].sort((a, b) => {
+    const an = a.planNumber ?? a.order;
+    const bn = b.planNumber ?? b.order;
+    return an - bn;
+  });
+
   return {
     ...stored,
-    lessons: stored.lessons.length > 0 ? stored.lessons : seed.lessons,
+    lessons: merged.length > 0 ? merged : seed.lessons,
     lectures: stored.lectures.length > 0 ? stored.lectures : seed.lectures,
   };
 }
