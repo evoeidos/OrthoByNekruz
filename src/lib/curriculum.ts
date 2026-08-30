@@ -330,12 +330,27 @@ function seedProgramById(programId: string): Program | null {
   return seedPrograms().find(p => p.id === programId) ?? null;
 }
 
+/**
+ * Копия в Redis перекрывает файлы проекта целиком. Если в админке сохранили
+ * только лекции (или пустой список занятий), 3 семестр пропадает у всех.
+ * Пустые блоки добираем из seed.
+ */
+function hydrateFromSeed(stored: Program): Program {
+  const seed = seedProgramById(stored.id);
+  if (!seed) return stored;
+  return {
+    ...stored,
+    lessons: stored.lessons.length > 0 ? stored.lessons : seed.lessons,
+    lectures: stored.lectures.length > 0 ? stored.lectures : seed.lectures,
+  };
+}
+
 export async function loadProgram(redis: AppRedis, programId: string): Promise<Program | null> {
   const suppressed = await loadSuppressedIds(redis);
   if (suppressed.has(programId)) return null;
 
   const stored = normalizeProgram(await redis.get(programKey(programId)));
-  if (stored) return { ...stored, builtIn: false };
+  if (stored) return { ...hydrateFromSeed(stored), builtIn: false };
   return seedProgramById(programId);
 }
 
@@ -351,11 +366,11 @@ export async function loadAllPrograms(redis: AppRedis): Promise<Program[]> {
   }
   for (const id of ids) {
     const stored = normalizeProgram(await redis.get(programKey(id)));
-    if (stored) byId.set(id, { ...stored, builtIn: false });
+    if (stored) byId.set(id, { ...hydrateFromSeed(stored), builtIn: false });
   }
 
   return [...byId.values()]
-    .filter(p => !suppressed.has(p.id))
+    .filter(p => !suppressed.has(p.id) || seedProgramById(p.id) != null)
     .sort((a, b) => {
       if (a.course !== b.course) return a.course - b.course;
       return a.title.localeCompare(b.title, 'ru');
