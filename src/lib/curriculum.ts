@@ -48,6 +48,8 @@ export interface LessonSection {
   title: string;
   text: string;
   terms?: string[];
+  /** Схемы и препараты подтемы — зум как в режиме чтения вопросов */
+  images?: string[];
 }
 
 export interface Lesson {
@@ -150,11 +152,18 @@ function normalizeSections(raw: unknown): LessonSection[] | undefined {
     const title = String(r.title ?? '').trim();
     const text = String(r.text ?? '').trim();
     if (!title || !text) return;
+    const images = normalizeStringList(
+      typeof r.images === 'string' || typeof r.image === 'string'
+        ? [r.images ?? r.image]
+        : r.images ?? r.image,
+      12,
+    );
     out.push({
       id: String(r.id ?? '').trim() || `s${i + 1}`,
       title,
       text,
       terms: normalizeStringList(r.terms, 40),
+      images,
     });
   });
   return out.length ? out : undefined;

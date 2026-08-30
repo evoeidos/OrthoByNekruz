@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Lecture, Lesson, LessonKind, LessonSection } from '@/lib/curriculum';
+import { ReadingImages, useImageZoom } from '@/components/ImageZoom';
 
 // Локальная копия подписей: импорт значения из curriculum притащил бы в
 // клиентский бандл все планы кафедр из файлов.
@@ -385,31 +386,28 @@ function ReadingView({
   const { lesson } = item;
   const isControl = lesson.kind !== 'lesson';
   const [fontSize, setFontSize] = useState(16);
-  const [openSections, setOpenSections] = useState<Set<string>>(new Set());
+  const [sectionIndex, setSectionIndex] = useState(0);
   const initialDistance = useRef<number | null>(null);
   const initialFontSize = useRef(16);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { openZoom, overlay: zoomOverlay } = useImageZoom();
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
-    const first = lesson.sections?.[0]?.id;
-    setOpenSections(first ? new Set([first]) : new Set());
+    setSectionIndex(0);
   }, [lesson.id]);
 
   const sections = lesson.sections ?? [];
+  const activeSection = sections[sectionIndex] ?? null;
   const termCount = useMemo(
     () => sections.reduce((n, s) => n + (s.terms?.length ?? 0), 0),
     [sections],
   );
-  const allOpen = sections.length > 0 && openSections.size === sections.length;
 
-  const toggleSection = (id: string) => {
-    setOpenSections(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const goSection = (i: number) => {
+    if (i < 0 || i >= sections.length) return;
+    setSectionIndex(i);
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -529,7 +527,7 @@ function ReadingView({
             </div>
           )}
 
-          {sections.length > 0 && (
+          {sections.length > 0 && activeSection && (
             <>
               <div
                 className="flex items-center gap-2"
@@ -540,33 +538,44 @@ function ReadingView({
                   className="flex-1 text-[11px] font-bold uppercase tracking-widest"
                   style={{ color: accent }}
                 >
-                  Разбор темы · {sections.length}
+                  Подтема {sectionIndex + 1} из {sections.length}
                   {termCount ? ` · ${termCount} терминов` : ''}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setOpenSections(
-                    allOpen ? new Set() : new Set(sections.map(s => s.id)),
-                  )}
-                  className="text-[11px] font-semibold px-2 py-1 rounded-lg"
-                  style={{ color: 'var(--c-muted)', border: '1px solid var(--c-border)' }}
-                >
-                  {allOpen ? 'Свернуть' : 'Развернуть всё'}
-                </button>
               </div>
-              <div className="flex flex-col gap-1.5">
-                {sections.map((section, i) => (
-                  <SectionAccordion
-                    key={section.id}
-                    section={section}
-                    index={i + 1}
-                    accent={accent}
-                    fontSize={fontSize}
-                    open={openSections.has(section.id)}
-                    onToggle={() => toggleSection(section.id)}
-                  />
-                ))}
+              <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+                {sections.map((section, i) => {
+                  const active = i === sectionIndex;
+                  return (
+                    <button
+                      key={section.id}
+                      type="button"
+                      onClick={() => goSection(i)}
+                      className="flex-shrink-0 text-[12px] font-bold tabular-nums w-8 h-8 rounded-full"
+                      style={{
+                        background: active
+                          ? accent
+                          : 'var(--c-card)',
+                        color: active ? '#fff' : 'var(--c-muted)',
+                        border: `1px solid ${active ? accent : 'var(--c-border)'}`,
+                      }}
+                      aria-label={section.title}
+                    >
+                      {i + 1}
+                    </button>
+                  );
+                })}
               </div>
+              <SectionPage
+                section={activeSection}
+                index={sectionIndex + 1}
+                accent={accent}
+                fontSize={fontSize}
+                onZoom={openZoom}
+                onPrev={() => goSection(sectionIndex - 1)}
+                onNext={() => goSection(sectionIndex + 1)}
+                hasPrev={sectionIndex > 0}
+                hasNext={sectionIndex < sections.length - 1}
+              />
             </>
           )}
 
@@ -755,117 +764,133 @@ function ReadingView({
           </button>
         </div>
       </div>
+      {zoomOverlay}
     </motion.div>
   );
 }
 
-/** Подтема из плана кафедры: заголовок всегда виден, разбор раскрывается. */
-function SectionAccordion({
+/** Одна подтема целиком — как страница конспекта, без сворачивания. */
+function SectionPage({
   section,
   index,
   accent,
   fontSize,
-  open,
-  onToggle,
+  onZoom,
+  onPrev,
+  onNext,
+  hasPrev,
+  hasNext,
 }: {
   section: LessonSection;
   index: number;
   accent: string;
   fontSize: number;
-  open: boolean;
-  onToggle: () => void;
+  onZoom: (list: string[], idx: number) => void;
+  onPrev: () => void;
+  onNext: () => void;
+  hasPrev: boolean;
+  hasNext: boolean;
 }) {
   return (
     <div
-      className="rounded-2xl overflow-hidden"
+      className="rounded-2xl px-4 py-4 flex flex-col gap-3"
       style={{
         background: 'var(--c-card)',
-        border: `1px solid ${open
-          ? `color-mix(in srgb, ${accent} 45%, var(--c-border))`
-          : 'var(--c-border)'}`,
+        border: `1px solid color-mix(in srgb, ${accent} 35%, var(--c-border))`,
       }}
     >
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full flex items-start gap-2.5 px-3 py-2.5 text-left"
-      >
+      <div className="flex items-start gap-2.5">
         <span
           className="flex-shrink-0 font-extrabold tabular-nums"
-          style={{ fontSize: `${fontSize * 0.8}px`, color: accent, marginTop: 1 }}
+          style={{ fontSize: `${fontSize * 0.8}px`, color: accent, marginTop: 2 }}
         >
           {index}
         </span>
-        <span
+        <h3
           className="flex-1 font-semibold leading-snug"
-          style={{ fontSize: `${fontSize * 0.94}px`, color: 'var(--c-text)' }}
+          style={{ fontSize: `${fontSize * 1.02}px`, color: 'var(--c-text)' }}
         >
           {section.title}
-        </span>
-        <ChevronRight
-          className="w-4 h-4 flex-shrink-0 transition-transform"
-          style={{
-            color: open ? accent : 'var(--c-muted)',
-            transform: open ? 'rotate(90deg)' : undefined,
-            marginTop: 2,
-          }}
-        />
-      </button>
+        </h3>
+      </div>
 
-      {open && (
-        <div className="px-3 pb-3 pt-0 flex flex-col gap-3">
-          <div
-            className="leading-relaxed break-words"
-            style={{
-              fontSize: `${fontSize * 0.94}px`,
-              color: 'color-mix(in srgb, var(--c-text) 90%, transparent)',
-            }}
+      <div
+        className="leading-relaxed break-words"
+        style={{
+          fontSize: `${fontSize * 0.94}px`,
+          color: 'color-mix(in srgb, var(--c-text) 90%, transparent)',
+        }}
+      >
+        {section.text}
+      </div>
+
+      <ReadingImages images={section.images} onZoom={onZoom} />
+
+      {section.terms?.length ? (
+        <div
+          className="flex flex-col gap-1.5 pt-2.5"
+          style={{ borderTop: '1px solid var(--c-border)' }}
+        >
+          <span
+            className="text-[10px] font-bold uppercase tracking-widest"
+            style={{ color: accent }}
           >
-            {section.text}
-          </div>
-
-          {section.terms?.length ? (
-            <div
-              className="flex flex-col gap-1.5 pt-2.5"
-              style={{ borderTop: '1px solid var(--c-border)' }}
-            >
-              <span
-                className="text-[10px] font-bold uppercase tracking-widest"
-                style={{ color: accent }}
-              >
-                Латынь · {section.terms.length}
-              </span>
-              {section.terms.map(term => {
-                const { ru, la } = splitTerm(term);
-                return (
-                  <div key={term} className="flex flex-col gap-0.5">
-                    <span
-                      className="leading-snug break-words"
-                      style={{
-                        fontSize: `${fontSize * 0.88}px`,
-                        color: 'color-mix(in srgb, var(--c-text) 90%, transparent)',
-                      }}
-                    >
-                      {ru}
-                    </span>
-                    {la && (
-                      <span
-                        className="leading-snug break-words italic"
-                        style={{
-                          fontSize: `${fontSize * 0.84}px`,
-                          color: accent,
-                        }}
-                      >
-                        {la}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
+            Латынь · {section.terms.length}
+          </span>
+          {section.terms.map(term => {
+            const { ru, la } = splitTerm(term);
+            return (
+              <div key={term} className="flex flex-col gap-0.5">
+                <span
+                  className="leading-snug break-words"
+                  style={{
+                    fontSize: `${fontSize * 0.88}px`,
+                    color: 'color-mix(in srgb, var(--c-text) 90%, transparent)',
+                  }}
+                >
+                  {ru}
+                </span>
+                {la && (
+                  <span
+                    className="leading-snug break-words italic"
+                    style={{
+                      fontSize: `${fontSize * 0.84}px`,
+                      color: accent,
+                    }}
+                  >
+                    {la}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
-      )}
+      ) : null}
+
+      <div className="flex items-center justify-between pt-1">
+        <button
+          type="button"
+          onClick={onPrev}
+          disabled={!hasPrev}
+          className="text-[12px] font-semibold px-3 py-1.5 rounded-full disabled:opacity-30"
+          style={{ color: accent, border: `1px solid ${accent}` }}
+        >
+          ← Назад
+        </button>
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={!hasNext}
+          className="text-[12px] font-semibold px-3 py-1.5 rounded-full disabled:opacity-30"
+          style={{
+            background: hasNext ? accent : 'transparent',
+            color: hasNext ? '#fff' : 'var(--c-muted)',
+            border: `1px solid ${hasNext ? accent : 'var(--c-border)'}`,
+          }}
+        >
+          Дальше →
+        </button>
+      </div>
     </div>
   );
 }
@@ -962,62 +987,43 @@ function LessonRow({
 }
 
 function LecturesBlock({ lectures }: { lectures: Lecture[] }) {
-  const [open, setOpen] = useState(false);
-
   return (
     <div
-      className="rounded-2xl overflow-hidden mt-2"
+      className="rounded-2xl mt-2 px-3 py-3 flex flex-col gap-2.5"
       style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}
     >
-      <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2.5 text-left"
-      >
-        <span className="flex-1 text-[13px] font-semibold" style={{ color: 'var(--c-text)' }}>
-          Лекции курса
-          <span className="font-medium ml-1.5" style={{ color: 'var(--c-muted)' }}>
-            {lectures.length}
-          </span>
+      <span className="text-[13px] font-semibold" style={{ color: 'var(--c-text)' }}>
+        Лекции курса
+        <span className="font-medium ml-1.5" style={{ color: 'var(--c-muted)' }}>
+          {lectures.length}
         </span>
-        <ChevronRight
-          className="w-4 h-4 transition-transform"
-          style={{
-            color: 'var(--c-muted)',
-            transform: open ? 'rotate(90deg)' : undefined,
-          }}
-        />
-      </button>
-      {open && (
-        <div className="px-3 pb-3 flex flex-col gap-2.5">
-          {lectures.map(lec => (
-            <div key={lec.id} className="flex gap-2">
+      </span>
+      {lectures.map(lec => (
+        <div key={lec.id} className="flex gap-2">
+          <span
+            className="flex-shrink-0 text-[11px] font-extrabold tabular-nums mt-[3px] w-5"
+            style={{ color: 'var(--c-muted)' }}
+          >
+            {lec.planNumber ?? lec.order}
+          </span>
+          <span className="flex-1">
+            <span
+              className="block text-[12.5px] font-semibold leading-snug"
+              style={{ color: 'var(--c-text)' }}
+            >
+              {lec.title}
+            </span>
+            {lec.summary && (
               <span
-                className="flex-shrink-0 text-[11px] font-extrabold tabular-nums mt-[3px] w-5"
+                className="block text-[11.5px] leading-snug mt-1"
                 style={{ color: 'var(--c-muted)' }}
               >
-                {lec.planNumber ?? lec.order}
+                {lec.summary}
               </span>
-              <span className="flex-1">
-                <span
-                  className="block text-[12.5px] font-semibold leading-snug"
-                  style={{ color: 'var(--c-text)' }}
-                >
-                  {lec.title}
-                </span>
-                {lec.summary && (
-                  <span
-                    className="block text-[11.5px] leading-snug mt-1"
-                    style={{ color: 'var(--c-muted)' }}
-                  >
-                    {lec.summary}
-                  </span>
-                )}
-              </span>
-            </div>
-          ))}
+            )}
+          </span>
         </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -1069,6 +1075,101 @@ function splitTerm(term: string): { ru: string; la: string | null } {
   const ru = term.slice(0, i).trim();
   const la = term.slice(i + 3).trim();
   return { ru, la: la || null };
+}
+
+/** Локальный предпросмотр нового чтения — без Telegram и API. */
+export function LessonsDesignPreview() {
+  const [open, setOpen] = useState(true);
+  const demo: FlatLesson = {
+    course: 2,
+    semester: 3,
+    lesson: {
+      id: 'preview_l50',
+      order: 50,
+      planNumber: 50,
+      semester: 3,
+      kind: 'lesson',
+      hours: 3,
+      title: 'Сердце. Ветви грудного отдела аорты',
+      summary: 'Строение сердца: камеры, клапаны, проводящая система. Перикард. Аорта и её ветви. Возрастные особенности у детей.',
+      objectives: [
+        'Показать на препарате все четыре клапана',
+        'Назвать ветви дуги аорты справа налево',
+      ],
+      sections: [
+        {
+          id: 's1',
+          title: 'Строение сердца',
+          text: 'Сердце — полый мышечный орган в среднем средостении, 2/3 левее срединной линии. Четыре камеры: правое и левое предсердие, правый и левый желудочек. У детей раннего возраста правый желудочек относительно более развит.',
+          images: ['/images/bio/tasks-ped/task-102.png', '/images/bio/tasks-ped/task-103.png'],
+          terms: [
+            'Правое предсердие — atrium dextrum',
+            'Левый желудочек — ventriculus sinister',
+            'Митральный клапан — valva mitralis',
+          ],
+        },
+        {
+          id: 's2',
+          title: 'Проводящая система сердца',
+          text: 'Синусовый узел в правом предсердии задаёт ритм 60–80 раз в минуту. Дальше импульс идёт в атриовентрикулярный узел, пучок Гиса и волокна Пуркинье. У новорождённых ЧСС 120–160.',
+          images: ['/images/bio/tasks-ped/task-107.png'],
+          terms: [
+            'Синусовый узел — nodus sinuatrialis',
+            'Пучок Гиса — fasciculus atrioventricularis',
+          ],
+        },
+        {
+          id: 's3',
+          title: 'Аорта. Ветви грудного отдела',
+          text: 'Восходящая аорта даёт венечные артерии. Дуга — три ветви: плечеголовной ствол, левая общая сонная, левая подключичная. Артериальный проток закрывается в первые дни жизни.',
+          terms: [
+            'Дуга аорты — arcus aortae',
+            'Артериальный проток — ductus arteriosus',
+          ],
+        },
+      ],
+    },
+  };
+
+  return (
+    <div className="min-h-screen" style={{ background: 'var(--c-bg)', color: 'var(--c-text)' }}>
+      <div className="max-w-md mx-auto min-h-screen flex flex-col px-4 pt-6">
+        <div className="text-[11px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--c-muted)' }}>
+          Предпросмотр · Занятия
+        </div>
+        <div
+          className="rounded-2xl px-3 py-2.5 flex items-center gap-2.5"
+          style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}
+        >
+          <span className="text-[12px] font-extrabold tabular-nums w-7 text-center" style={{ color: 'hsl(210 90% 58%)' }}>
+            50
+          </span>
+          <span className="flex-1 text-[13.5px] font-semibold">Сердце. Ветви грудного отдела аорты</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="mt-3 text-[13px] font-bold px-4 py-2 rounded-full self-start"
+          style={{ background: 'var(--c-primary)', color: 'var(--c-bg)' }}
+        >
+          Открыть чтение
+        </button>
+      </div>
+      {open && (
+        <ReadingView
+          item={demo}
+          accent="hsl(210 90% 58%)"
+          subjectLabel="Анатомия"
+          allItems={[demo]}
+          isDone={false}
+          onToggleDone={() => undefined}
+          onPrev={() => undefined}
+          onNext={() => undefined}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </div>
+  );
 }
 
 /** [31,32,33,34] → «31–34», [1,2,3,5,6] → «1–3, 5, 6» */
