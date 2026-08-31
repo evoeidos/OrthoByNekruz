@@ -93,6 +93,17 @@ export function markCoachTourSeen(): void {
   }
 }
 
+export const COACH_TOUR_RESTART_EVENT = 'coach-tour-restart';
+
+/** Сбросить флаг и заново открыть тур (из профиля). */
+export function restartCoachTour(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(COACH_TOUR_SEEN_KEY);
+  } catch { /* ignore */ }
+  window.dispatchEvent(new Event(COACH_TOUR_RESTART_EVENT));
+}
+
 export function stepAvailable(
   step: CoachStep,
   hiddenTabs: Array<'lessons' | 'questions' | 'tests' | 'tasks' | 'stats'>,
@@ -165,6 +176,15 @@ export function isElementInVisualViewport(el: Element, margin = 8): boolean {
   );
 }
 
+function boxesOverlap(a: CoachBox, b: CoachBox, gap = 8): boolean {
+  return (
+    a.left < b.left + b.width + gap
+    && a.left + a.width + gap > b.left
+    && a.top < b.top + b.height + gap
+    && a.top + a.height + gap > b.top
+  );
+}
+
 export function holeFromElement(el: HTMLElement, pad = 6): CoachBox & { radius: number } {
   const r = el.getBoundingClientRect();
   const radius = parseFloat(getComputedStyle(el).borderRadius) || 16;
@@ -224,6 +244,20 @@ export function placeTooltip(opts: {
 
   let left = target.left + target.width / 2 - tw / 2;
   left = clamp(left, minLeft, maxLeft);
+
+  const card: CoachBox = { left, top, width: tw, height: th };
+  if (boxesOverlap(card, target, gap)) {
+    const flipped: CoachPlacement = placement === 'above' ? 'below' : 'above';
+    let flippedTop = flipped === 'above'
+      ? target.top - gap - th
+      : target.top + target.height + gap;
+    flippedTop = clamp(flippedTop, minTop, maxTop);
+    const flippedCard: CoachBox = { left, top: flippedTop, width: tw, height: th };
+    if (!boxesOverlap(flippedCard, target, gap)) {
+      placement = flipped;
+      top = flippedTop;
+    }
+  }
 
   const targetCenter = target.left + target.width / 2;
   const arrowOffset = clamp(targetCenter - left, 18, Math.max(18, tw - 18));

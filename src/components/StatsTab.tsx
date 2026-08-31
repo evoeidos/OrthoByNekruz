@@ -21,6 +21,7 @@ import {
   hasExamTicketData,
   type ExamTicket,
 } from '@/lib/examTickets';
+import { restartCoachTour } from '@/lib/coachTour';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Theme = 'dark' | 'light' | 'bright';
@@ -786,6 +787,28 @@ export const StatsTab: React.FC<StatsTabProps> = ({
               </div>
               <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: accentColor }} />
             </button>}
+
+            {/* ─── КАК ПОЛЬЗОВАТЬСЯ ─── */}
+            <button
+              type="button"
+              onClick={() => restartCoachTour()}
+              className="w-full rounded-[18px] p-4 flex items-center gap-3.5 transition-all duration-200 active:scale-[0.98]"
+              style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}
+            >
+              <div
+                className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 text-[20px]"
+                style={{ background: `color-mix(in srgb, ${accentColor} 14%, transparent)`, border: '1px solid var(--c-border)' }}
+              >
+                👋
+              </div>
+              <div className="flex-1 text-left min-w-0">
+                <div className="text-[14px] font-bold" style={{ color: 'var(--c-text)' }}>Как пользоваться</div>
+                <div className="text-[11.5px] mt-0.5" style={{ color: 'var(--c-muted)' }}>
+                  Короткий тур по кнопкам внизу — ещё раз
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: accentColor }} />
+            </button>
 
             {/* ─── МОИ ПРЕДМЕТЫ ─── */}
             <button

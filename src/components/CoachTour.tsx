@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import type { TabType } from '@/components/Navigation';
 import {
   COACH_TOUR_DISMISS_ON_BACKDROP,
+  COACH_TOUR_RESTART_EVENT,
   COACH_TOUR_STEPS,
   coachSelector,
   getVisualViewportBox,
@@ -42,11 +43,38 @@ interface CoachTourProps {
   dismissOnBackdrop?: boolean;
 }
 
-function haptic(kind: 'light' | 'medium' = 'light') {
+function haptic(kind: 'light' | 'medium' | 'selection' = 'light') {
   try {
-    (window as { Telegram?: { WebApp?: { HapticFeedback?: { impactOccurred: (s: string) => void } } } })
-      .Telegram?.WebApp?.HapticFeedback?.impactOccurred(kind);
+    const hapticApi = (window as {
+      Telegram?: {
+        WebApp?: {
+          HapticFeedback?: {
+            impactOccurred: (s: string) => void;
+            selectionChanged: () => void;
+          };
+        };
+      };
+    }).Telegram?.WebApp?.HapticFeedback;
+    if (!hapticApi) return;
+    if (kind === 'selection') hapticApi.selectionChanged();
+    else hapticApi.impactOccurred(kind);
   } catch { /* ignore */ }
+}
+
+type TgBackButton = {
+  show: () => void;
+  hide: () => void;
+  onClick: (fn: () => void) => void;
+  offClick: (fn: () => void) => void;
+};
+
+function telegramBackButton(): TgBackButton | null {
+  try {
+    return (window as { Telegram?: { WebApp?: { BackButton?: TgBackButton } } })
+      .Telegram?.WebApp?.BackButton ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -133,15 +161,21 @@ export const CoachTour: React.FC<CoachTourProps> = ({
   }, [finish]);
 
   const next = useCallback(() => {
-    haptic('light');
+    haptic('selection');
     if (isLast) {
       finish(true);
       return;
     }
     setReady(false);
-    setLayout(null);
     setStepIndex(i => i + 1);
   }, [finish, isLast]);
+
+  const prev = useCallback(() => {
+    if (stepIndex <= 0) return;
+    haptic('selection');
+    setReady(false);
+    setStepIndex(i => Math.max(0, i - 1));
+  }, [stepIndex]);
 
   const onBackdrop = useCallback(() => {
     if (!dismissOnBackdrop) return;
@@ -194,7 +228,6 @@ export const CoachTour: React.FC<CoachTourProps> = ({
       targetRef.current = el;
       await revealTarget(el);
       if (cancelled) return;
-      setLayout(null);
       setReady(true);
     };
 
@@ -203,6 +236,59 @@ export const CoachTour: React.FC<CoachTourProps> = ({
       cancelled = true;
     };
   }, [open, blocked, step, stepIndex, steps.length, onHighlightTab, finish]);
+
+  useEffect(() => {
+    const begin = () => {
+      if (blocked) return;
+      closedRef.current = false;
+      startedRef.current = true;
+      startTabRef.current = activeTabRef.current ?? null;
+      setStepIndex(0);
+      setReady(false);
+      setOpen(true);
+    };
+    window.addEventListener(COACH_TOUR_RESTART_EVENT, begin);
+    return () => window.removeEventListener(COACH_TOUR_RESTART_EVENT, begin);
+  }, [blocked]);
+
+  useEffect(() => {
+    if (!open) return;
+    const back = telegramBackButton();
+    if (!back) return;
+    if (stepIndex <= 0) {
+      try { back.hide(); } catch { /* ignore */ }
+      return;
+    }
+    const onBack = () => prev();
+    try {
+      back.show();
+      back.onClick(onBack);
+    } catch { /* ignore */ }
+    return () => {
+      try {
+        back.offClick(onBack);
+        back.hide();
+      } catch { /* ignore */ }
+    };
+  }, [open, prev, stepIndex]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        skip();
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        next();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        prev();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, skip, next, prev]);
 
   const measure = useCallback(() => {
     const el = targetRef.current;
@@ -279,7 +365,6 @@ export const CoachTour: React.FC<CoachTourProps> = ({
         <AnimatePresence>
           {layout && (
             <motion.div
-              key={step.id}
               className="absolute"
               initial={false}
               animate={{
@@ -287,10 +372,10 @@ export const CoachTour: React.FC<CoachTourProps> = ({
                 left: layout.hole.left,
                 width: layout.hole.width,
                 height: layout.hole.height,
+                borderRadius: layout.hole.radius,
               }}
               transition={{ type: 'spring', stiffness: 380, damping: 34 }}
               style={{
-                borderRadius: layout.hole.radius,
                 boxShadow: '0 0 0 9999px rgba(8, 12, 10, 0.72)',
                 outline: '2px solid var(--c-primary)',
                 pointerEvents: 'none',
@@ -311,8 +396,9 @@ export const CoachTour: React.FC<CoachTourProps> = ({
           top: layout?.tooltip.top ?? 0,
           width: layout?.tooltip.width ?? Math.min(340, typeof window !== 'undefined' ? window.innerWidth - 24 : 320),
           maxHeight: layout?.tooltip.maxHeight,
-          visibility: layout ? 'visible' : 'hidden',
-          pointerEvents: layout ? 'auto' : 'none',
+          visibility: layout && ready ? 'visible' : 'hidden',
+          pointerEvents: layout && ready ? 'auto' : 'none',
+          transition: 'left 0.22s ease, top 0.22s ease',
         }}
         onClick={e => e.stopPropagation()}
       >
@@ -375,6 +461,8 @@ export const CoachTour: React.FC<CoachTourProps> = ({
             <button
               type="button"
               onClick={next}
+              autoFocus
+              key={step.id}
               className="h-11 min-w-[44px] flex-[1.4] rounded-2xl text-[13px] font-bold"
               style={{
                 background: 'var(--c-primary)',
