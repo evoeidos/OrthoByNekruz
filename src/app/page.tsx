@@ -12,6 +12,7 @@ import { AccessWelcomeOverlay, PREVIEW_AWAITING_CONFIRM_KEY, PREVIEW_WELCOME_SEE
 import { GroupAccessHintModal } from '@/components/GroupAccessHintModal';
 import { AuthGate }     from '@/components/AuthGate';
 import { Navigation, TabType, type BioGameMode } from '@/components/Navigation';
+import { CoachTour } from '@/components/CoachTour';
 import { QuestionsTab }  from '@/components/QuestionsTab';
 import { TestsTab }      from '@/components/TestsTab';
 import { TasksTab }      from '@/components/TasksTab';
@@ -1957,6 +1958,14 @@ export default function Home() {
           onBioModeCycle={subjectHasQuestionGameModes(subject) ? handleBioModeCycle : undefined}
           bioGameMode={subjectHasQuestionGameModes(subject) ? bioQuestionsSection : 'list'}
           gameModesSubject={subjectHasQuestionGameModes(subject) ? subject : undefined}
+        />
+      )}
+      {!testMode && (
+        <CoachTour
+          blocked={showAccessWelcome || showGroupAccessHint || showGroupForReceipt}
+          hiddenTabs={navigationHiddenTabs}
+          activeTab={activeTab}
+          onHighlightTab={handleNavTabChange}
         />
       )}
     </main>

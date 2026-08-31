@@ -170,6 +170,7 @@ export const Navigation: React.FC<NavigationProps> = ({
       style={{ bottom: 'calc(var(--nav-bottom, 12px) + 14px)' }}
     >
       <nav
+        data-coach="nav-bar"
         className="flex items-center gap-1 p-1.5 rounded-full"
         style={{
           background: 'var(--c-nav-bg)',
@@ -212,6 +213,7 @@ export const Navigation: React.FC<NavigationProps> = ({
             <button
               key={item.key}
               type="button"
+              data-coach={`nav-${item.key}`}
               onClick={() => {
                 // Активный «Экзамен» переключают сегментами, а не самой кнопкой
                 if (isActive && hasSegments) return;
