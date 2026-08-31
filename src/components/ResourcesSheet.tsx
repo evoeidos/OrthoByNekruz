@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Resource } from '@/pages/api/resources';
+import { openExternalUrl } from '@/lib/openExternalUrl';
 
 // ── Иконка и цвет по типу ─────────────────────────────────────────────────────
 const TYPE_META: Record<Resource['type'], { emoji: string; label: string; color: string; bg: string }> = {
@@ -17,22 +18,12 @@ const TYPE_META: Record<Resource['type'], { emoji: string; label: string; color:
 
 const TYPE_ORDER: Resource['type'][] = ['umkd', 'video', 'pdf', 'pptx', 'docx', 'link'];
 
-function openUrl(url: string) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tg = (window as any).Telegram?.WebApp;
-  if (tg?.openLink) {
-    tg.openLink(url);
-  } else {
-    window.open(url, '_blank', 'noopener,noreferrer');
-  }
-}
-
 // ── Карточка ресурса ──────────────────────────────────────────────────────────
 function ResourceCard({ resource }: { resource: Resource }) {
   const meta = TYPE_META[resource.type];
   return (
     <button
-      onClick={() => openUrl(resource.url)}
+      onClick={() => openExternalUrl(resource.url)}
       className="w-full text-left flex items-center gap-3 rounded-[14px] p-3 transition-all active:scale-[0.98]"
       style={{
         background: 'var(--c-card)',

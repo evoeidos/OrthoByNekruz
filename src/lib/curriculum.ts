@@ -43,6 +43,11 @@ export const LESSON_KIND_LABELS: Record<LessonKind, string> = {
  * Каждая раскрывается отдельно, поэтому текст пишется самодостаточным: разбор
  * подтемы и латинские названия структур, которые в ней разбирают.
  */
+export interface LessonLink {
+  label: string;
+  url: string;
+}
+
 export interface LessonSection {
   id: string;
   title: string;
@@ -50,6 +55,8 @@ export interface LessonSection {
   terms?: string[];
   /** Схемы и препараты подтемы — зум как в режиме чтения вопросов */
   images?: string[];
+  /** Кнопки-ссылки в тексте подтемы (магазины приложений, сайты) */
+  links?: LessonLink[];
 }
 
 export interface Lesson {
@@ -143,6 +150,21 @@ function normalizeCovers(raw: unknown): number[] | undefined {
   return out.length ? out : undefined;
 }
 
+function normalizeLinks(raw: unknown): LessonLink[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: LessonLink[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    const label = String(r.label ?? '').trim();
+    const url = String(r.url ?? '').trim();
+    if (!label || !/^https?:\/\//i.test(url)) continue;
+    out.push({ label, url });
+    if (out.length >= 8) break;
+  }
+  return out.length ? out : undefined;
+}
+
 function normalizeSections(raw: unknown): LessonSection[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const out: LessonSection[] = [];
@@ -164,6 +186,7 @@ function normalizeSections(raw: unknown): LessonSection[] | undefined {
       text,
       terms: normalizeStringList(r.terms, 40),
       images,
+      links: normalizeLinks(r.links),
     });
   });
   return out.length ? out : undefined;
@@ -344,16 +367,33 @@ function mergeSectionImages(stored: LessonSection, seed?: LessonSection): Lesson
   return {
     ...stored,
     images: stored.images?.length ? stored.images : seed.images,
+    links: stored.links?.length ? stored.links : seed.links,
   };
+}
+
+/** Seed задаёт порядок и новые подтемы; текст из Redis не затираем. */
+function mergeSectionsFromSeed(
+  stored?: LessonSection[],
+  seed?: LessonSection[],
+): LessonSection[] | undefined {
+  if (!seed?.length) return stored;
+  if (!stored?.length) return seed;
+  const storedById = new Map(stored.map(s => [s.id, s]));
+  const seedIds = new Set(seed.map(s => s.id));
+  const merged = seed.map(s => {
+    const prev = storedById.get(s.id);
+    return prev ? mergeSectionImages(prev, s) : s;
+  });
+  const extras = stored.filter(s => !seedIds.has(s.id));
+  return [...merged, ...extras];
 }
 
 function mergeLessonFromSeed(stored: Lesson, seed?: Lesson): Lesson {
   if (!seed) return stored;
-  const seedSections = new Map((seed.sections ?? []).map(s => [s.id, s]));
-  const sections = stored.sections?.length
-    ? stored.sections.map(s => mergeSectionImages(s, seedSections.get(s.id)))
-    : seed.sections;
-  return { ...stored, sections };
+  return {
+    ...stored,
+    sections: mergeSectionsFromSeed(stored.sections, seed.sections),
+  };
 }
 
 /**

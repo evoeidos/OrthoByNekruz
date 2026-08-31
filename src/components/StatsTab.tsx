@@ -15,6 +15,8 @@ import { loadSubjectData } from '@/lib/subjectData';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ExamScreen, loadExamHistory, ExamHistoryEntry } from './ExamScreen';
 import { ResourcesSheet } from './ResourcesSheet';
+import { DepartmentSheet } from './DepartmentSheet';
+import { getDepartment } from '@/lib/departments';
 import {
   buildExamTicketsForSubject,
   getExamTicketCompositionLabel,
@@ -287,6 +289,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
     setExamTickets([]);
     setQuestionsData([]);
     setTasksData([]);
+    setShowDepartment(false);
     Promise.all([
       loadSubjectData(subject, 'questions'),
       loadSubjectData(subject, 'tasks'),
@@ -322,6 +325,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
   const [glossaryColor,      setGlossaryColor]      = useState<string>('var(--c-text)');
   const [showSubjectSheet,   setShowSubjectSheet]   = useState(false);
   const [showResources,      setShowResources]      = useState(false);
+  const [showDepartment,     setShowDepartment]     = useState(false);
   const [showExam,           setShowExam]           = useState(false);
   const [examHistory,        setExamHistory]        = useState<ExamHistoryEntry[]>([]);
   const [examDate,           setExamDate]           = useState<string | null>(null);
@@ -422,6 +426,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
 
   const accentColor  = cfg?.color || 'var(--c-primary)';
   const subjectLabel = cfg?.label || 'Ортопедия';
+  const department   = getDepartment(subject);
 
   const grade = overall >= 80 ? 'отлично' : overall >= 60 ? 'хорошо' : overall >= 35 ? 'идём' : 'старт';
 
@@ -766,6 +771,27 @@ export const StatsTab: React.FC<StatsTabProps> = ({
               );
             })()}
 
+            {/* ─── КАФЕДРА ─── */}
+            {department && <button
+              onClick={() => setShowDepartment(true)}
+              className="w-full rounded-[18px] p-4 flex items-center gap-3.5 transition-all duration-200 active:scale-[0.98]"
+              style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}
+            >
+              <div
+                className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 text-[20px]"
+                style={{ background: `color-mix(in srgb, ${accentColor} 14%, transparent)`, border: '1px solid var(--c-border)' }}
+              >
+                🏛️
+              </div>
+              <div className="flex-1 text-left min-w-0">
+                <div className="text-[14px] font-bold" style={{ color: 'var(--c-text)' }}>Кафедра</div>
+                <div className="text-[11.5px] mt-0.5" style={{ color: 'var(--c-muted)' }}>
+                  Кто преподаёт, где сидит, чем пользоваться
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: accentColor }} />
+            </button>}
+
             {/* ─── ПОЛЕЗНЫЕ МАТЕРИАЛЫ ─── */}
             {!materialsHidden && <button
               onClick={() => setShowResources(true)}
@@ -861,6 +887,17 @@ export const StatsTab: React.FC<StatsTabProps> = ({
           </div>
         </ScrollArea>
       </div>
+
+      {/* Кафедра предмета */}
+      <AnimatePresence>
+        {showDepartment && department && (
+          <DepartmentSheet
+            department={department}
+            accentColor={accentColor}
+            onClose={() => setShowDepartment(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Полезные материалы */}
       <AnimatePresence>

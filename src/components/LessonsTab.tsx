@@ -7,8 +7,11 @@ import {
   Circle, GraduationCap, Target, X,
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { Lecture, Lesson, LessonKind, LessonSection } from '@/lib/curriculum';
+import type { Lecture, Lesson, LessonKind, LessonLink, LessonSection } from '@/lib/curriculum';
 import { ReadingImages, useImageZoom } from '@/components/ImageZoom';
+import { DepartmentSheet } from '@/components/DepartmentSheet';
+import { getDepartment } from '@/lib/departments';
+import { openExternalUrl } from '@/lib/openExternalUrl';
 
 // Локальная копия подписей: импорт значения из curriculum притащил бы в
 // клиентский бандл все планы кафедр из файлов.
@@ -116,6 +119,7 @@ export const LessonsTab = ({ onOpenProfile }: { onOpenProfile?: () => void }) =>
   const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
   const [readingId, setReadingId] = useState<string | null>(null);
   const [done, setDone] = useState<Set<string>>(new Set());
+  const [showDepartment, setShowDepartment] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -163,6 +167,7 @@ export const LessonsTab = ({ onOpenProfile }: { onOpenProfile?: () => void }) =>
   useEffect(() => {
     setDone(view ? readDone(view.subjectId) : new Set());
     setReadingId(null);
+    setShowDepartment(false);
   }, [view]);
 
   const toggleDone = useCallback((lessonId: string) => {
@@ -229,6 +234,7 @@ export const LessonsTab = ({ onOpenProfile }: { onOpenProfile?: () => void }) =>
 
   const doneCount = view.items.filter(i => done.has(i.lesson.id)).length;
   const controlCount = view.items.filter(i => i.lesson.kind !== 'lesson').length;
+  const department = getDepartment(view.subjectId);
 
   return (
     <div className="flex flex-col h-full">
@@ -304,6 +310,33 @@ export const LessonsTab = ({ onOpenProfile }: { onOpenProfile?: () => void }) =>
 
       <ScrollArea className="flex-1">
         <div className="px-4 py-3 flex flex-col gap-2 pb-28">
+          {department && (
+            <button
+              type="button"
+              onClick={() => setShowDepartment(true)}
+              className="rounded-2xl px-3.5 py-3 flex items-center gap-3 text-left mb-1 transition-all active:scale-[0.99]"
+              style={{
+                background: `color-mix(in srgb, ${view.color} 10%, var(--c-card))`,
+                border: `1px solid color-mix(in srgb, ${view.color} 32%, var(--c-border))`,
+              }}
+            >
+              <span
+                className="w-10 h-10 rounded-[11px] flex items-center justify-center text-[18px] flex-shrink-0"
+                style={{ background: `color-mix(in srgb, ${view.color} 16%, transparent)` }}
+              >
+                🏛️
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-[13.5px] font-bold leading-snug" style={{ color: 'var(--c-text)' }}>
+                  {department.name}
+                </span>
+                <span className="block text-[11.5px] mt-0.5 leading-snug" style={{ color: 'var(--c-muted)' }}>
+                  Кто преподаёт, куда идти и что скачать
+                </span>
+              </span>
+              <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: view.color }} />
+            </button>
+          )}
           {view.items.map((item, i) => {
             const prev = i > 0 ? view.items[i - 1] : null;
             const showHeader = !prev || sectionTitle(prev) !== sectionTitle(item);
@@ -353,6 +386,16 @@ export const LessonsTab = ({ onOpenProfile }: { onOpenProfile?: () => void }) =>
             onPrev={() => step(-1)}
             onNext={() => step(1)}
             onClose={() => setReadingId(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showDepartment && department && (
+          <DepartmentSheet
+            department={department}
+            accentColor={view.color}
+            onClose={() => setShowDepartment(false)}
           />
         )}
       </AnimatePresence>
@@ -769,6 +812,28 @@ function ReadingView({
   );
 }
 
+function SectionLinks({ links, accent }: { links: LessonLink[]; accent: string }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {links.map(link => (
+        <button
+          key={link.url}
+          type="button"
+          onClick={() => openExternalUrl(link.url)}
+          className="w-full text-left text-[13px] font-semibold px-3 py-2.5 rounded-xl transition-all active:scale-[0.98]"
+          style={{
+            background: `color-mix(in srgb, ${accent} 14%, transparent)`,
+            color: accent,
+            border: `1px solid color-mix(in srgb, ${accent} 35%, transparent)`,
+          }}
+        >
+          {link.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Одна подтема целиком — как страница конспекта, без сворачивания. */
 function SectionPage({
   section,
@@ -815,7 +880,7 @@ function SectionPage({
       </div>
 
       <div
-        className="leading-relaxed break-words"
+        className="leading-relaxed break-words whitespace-pre-wrap"
         style={{
           fontSize: `${fontSize * 0.94}px`,
           color: 'color-mix(in srgb, var(--c-text) 90%, transparent)',
@@ -823,6 +888,8 @@ function SectionPage({
       >
         {section.text}
       </div>
+
+      {section.links?.length ? <SectionLinks links={section.links} accent={accent} /> : null}
 
       <ReadingImages images={section.images} onZoom={onZoom} />
 
@@ -1078,8 +1145,15 @@ function splitTerm(term: string): { ru: string; la: string | null } {
 }
 
 /** Локальный предпросмотр нового чтения — без Telegram и API. */
-export function LessonsDesignPreview() {
-  const [open, setOpen] = useState(true);
+export function LessonsDesignPreview({ firstLesson }: { firstLesson?: Lesson }) {
+  const [mode, setMode] = useState<'heart' | 'first' | 'department' | null>(
+    firstLesson ? 'first' : 'heart',
+  );
+  const anatColor = 'hsl(0 75% 55%)';
+  const department = getDepartment('anat');
+  const firstItem: FlatLesson | null = firstLesson
+    ? { course: 1, semester: firstLesson.semester, lesson: firstLesson }
+    : null;
   const demo: FlatLesson = {
     course: 2,
     semester: 3,
@@ -1133,29 +1207,51 @@ export function LessonsDesignPreview() {
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--c-bg)', color: 'var(--c-text)' }}>
-      <div className="max-w-md mx-auto min-h-screen flex flex-col px-4 pt-6">
+      <div className="max-w-md mx-auto min-h-screen flex flex-col px-4 pt-6 pb-10">
         <div className="text-[11px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--c-muted)' }}>
           Предпросмотр · Занятия
         </div>
-        <div
-          className="rounded-2xl px-3 py-2.5 flex items-center gap-2.5"
-          style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}
-        >
-          <span className="text-[12px] font-extrabold tabular-nums w-7 text-center" style={{ color: 'hsl(210 90% 58%)' }}>
-            50
-          </span>
-          <span className="flex-1 text-[13.5px] font-semibold">Сердце. Ветви грудного отдела аорты</span>
+        <div className="flex flex-col gap-2">
+          {firstLesson && (
+            <button
+              type="button"
+              onClick={() => setMode('first')}
+              className="rounded-2xl px-3.5 py-3 flex items-center gap-3 text-left"
+              style={{ background: 'var(--c-card)', border: `1px solid color-mix(in srgb, ${anatColor} 32%, var(--c-border))` }}
+            >
+              <span className="text-[12px] font-extrabold tabular-nums w-7 text-center" style={{ color: anatColor }}>1</span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-[13.5px] font-semibold">Первое занятие · как учить</span>
+                <span className="block text-[11px] mt-0.5" style={{ color: 'var(--c-muted)' }}>Anatomy Learning и введение</span>
+              </span>
+            </button>
+          )}
+          {department && (
+            <button
+              type="button"
+              onClick={() => setMode('department')}
+              className="rounded-2xl px-3.5 py-3 flex items-center gap-3 text-left"
+              style={{ background: `color-mix(in srgb, ${anatColor} 10%, var(--c-card))`, border: `1px solid color-mix(in srgb, ${anatColor} 32%, var(--c-border))` }}
+            >
+              <span className="text-[18px]">🏛️</span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-[13.5px] font-bold">{department.name}</span>
+                <span className="block text-[11px] mt-0.5" style={{ color: 'var(--c-muted)' }}>Кто преподаёт, куда идти и что скачать</span>
+              </span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setMode('heart')}
+            className="rounded-2xl px-3 py-2.5 flex items-center gap-2.5 text-left"
+            style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}
+          >
+            <span className="text-[12px] font-extrabold tabular-nums w-7 text-center" style={{ color: 'hsl(210 90% 58%)' }}>50</span>
+            <span className="flex-1 text-[13.5px] font-semibold">Сердце. Ветви грудного отдела аорты</span>
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="mt-3 text-[13px] font-bold px-4 py-2 rounded-full self-start"
-          style={{ background: 'var(--c-primary)', color: 'var(--c-bg)' }}
-        >
-          Открыть чтение
-        </button>
       </div>
-      {open && (
+      {mode === 'heart' && (
         <ReadingView
           item={demo}
           accent="hsl(210 90% 58%)"
@@ -1165,7 +1261,27 @@ export function LessonsDesignPreview() {
           onToggleDone={() => undefined}
           onPrev={() => undefined}
           onNext={() => undefined}
-          onClose={() => setOpen(false)}
+          onClose={() => setMode(null)}
+        />
+      )}
+      {mode === 'first' && firstItem && (
+        <ReadingView
+          item={firstItem}
+          accent={anatColor}
+          subjectLabel="Анатомия"
+          allItems={[firstItem]}
+          isDone={false}
+          onToggleDone={() => undefined}
+          onPrev={() => undefined}
+          onNext={() => undefined}
+          onClose={() => setMode(null)}
+        />
+      )}
+      {mode === 'department' && department && (
+        <DepartmentSheet
+          department={department}
+          accentColor={anatColor}
+          onClose={() => setMode(null)}
         />
       )}
     </div>
