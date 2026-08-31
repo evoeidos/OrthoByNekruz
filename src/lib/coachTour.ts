@@ -28,6 +28,7 @@ export type CoachStep = {
   id: string;
   /** Значение атрибута data-coach на целевом элементе. */
   target: string;
+  emoji: string;
   title: string;
   body: string;
   /** Переключить нижний таб, чтобы подсветка совпала с активной пилюлей. */
@@ -38,12 +39,14 @@ export const COACH_TOUR_STEPS: CoachStep[] = [
   {
     id: 'nav-bar',
     target: 'nav-bar',
+    emoji: '🧭',
     title: 'Главное меню',
     body: 'Внизу четыре кнопки — это всё приложение. Жми туда, куда надо, остальное не ищи.',
   },
   {
     id: 'nav-lessons',
     target: 'nav-lessons',
+    emoji: '📚',
     tab: 'lessons',
     title: 'Занятия',
     body: 'Конспекты и разборы по темам. Если ещё не открывал занятие — начинай отсюда.',
@@ -51,6 +54,7 @@ export const COACH_TOUR_STEPS: CoachStep[] = [
   {
     id: 'nav-exam',
     target: 'nav-exam',
+    emoji: '🎓',
     tab: 'questions',
     title: 'Экзамен',
     body: 'Вопросы и задачи, как будут спрашивать. Гоняй, когда уже что-то читал, а не в первый день.',
@@ -58,6 +62,7 @@ export const COACH_TOUR_STEPS: CoachStep[] = [
   {
     id: 'nav-tests',
     target: 'nav-tests',
+    emoji: '✅',
     tab: 'tests',
     title: 'Тест',
     body: 'Короткая проверка по темам. Удобно перед парой или чтобы понять, что ещё не село.',
@@ -65,6 +70,7 @@ export const COACH_TOUR_STEPS: CoachStep[] = [
   {
     id: 'nav-stats',
     target: 'nav-stats',
+    emoji: '📊',
     tab: 'stats',
     title: 'Профиль',
     body: 'Прогресс, смена предмета и настройки. Сюда же — если что-то открылось не так.',
