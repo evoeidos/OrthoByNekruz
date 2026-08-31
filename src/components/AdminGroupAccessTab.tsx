@@ -185,6 +185,7 @@ export default function AdminGroupAccessTab({
   const [catalog, setCatalog] = useState<CatalogSubject[]>([]);
   const [bulkModules, setBulkModules] = useState<PreviewModule[]>(['questions', 'tests', 'tasks']);
   const [bulkLessonsAccess, setBulkLessonsAccess] = useState<LessonsAccess>('show');
+  const [confirmOpenAll, setConfirmOpenAll] = useState(false);
 
   const faculty = useMemo(
     () => tree.find(f => f.facultyId === facultyId) ?? null,
@@ -237,6 +238,26 @@ export default function AdminGroupAccessTab({
     return courseGroups.filter(g => g.subjects.some(s => s.active));
   }, [courseGroups, showOnlyActive]);
 
+  const allVisibleSelected = visibleGroups.length > 0
+    && visibleGroups.every(g => selectedGroups.has(g.studyGroup));
+
+  const facultyGroupCount = useMemo(
+    () => faculty?.courses.reduce((n, c) => n + c.groups.length, 0) ?? 0,
+    [faculty],
+  );
+
+  const allTreeGroupCount = useMemo(
+    () => tree.reduce((n, f) => n + f.courses.reduce((m, c) => m + c.groups.length, 0), 0),
+    [tree],
+  );
+
+  const subjectCount = useMemo(
+    () => faculty?.courses[0]?.groups[0]?.subjects.length
+      ?? tree.find(f => f.courses[0]?.groups[0])?.courses[0]?.groups[0]?.subjects.length
+      ?? 0,
+    [faculty, tree],
+  );
+
   const bulkModuleOptions = useMemo(
     () => moduleOptionsForSubject(catalog, bulkSubject),
     [catalog, bulkSubject],
@@ -283,6 +304,18 @@ export default function AdminGroupAccessTab({
     for (const g of courseGroups) {
       const n = Number(g.digits);
       if (n >= from && n <= to) next.add(g.studyGroup);
+    }
+    setSelectedGroups(next);
+  };
+
+  const selectAllVisible = () => {
+    setSelectedGroups(new Set(visibleGroups.map(g => g.studyGroup)));
+  };
+
+  const selectEntireFaculty = () => {
+    const next = new Set<string>();
+    for (const c of faculty?.courses ?? []) {
+      for (const g of c.groups) next.add(g.studyGroup);
     }
     setSelectedGroups(next);
   };
@@ -381,6 +414,36 @@ export default function AdminGroupAccessTab({
     }
   };
 
+  const openAllContent = async () => {
+    const initData = getTelegramInitData();
+    if (!initData) { showToast('Нет initData'); return; }
+    setSaving(true);
+    try {
+      const r = await fetch('/api/admin-group-access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'open_all_content',
+          secret,
+          initData,
+          confirm: true,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Ошибка');
+      setTree(d.tree ?? []);
+      setSelectedGroups(new Set());
+      setConfirmOpenAll(false);
+      showToast(
+        `✓ Весь контент открыт: ${d.groups ?? 0} групп · ${d.subjects ?? 0} предметов · ${d.synced ?? 0} студ.`,
+      );
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Ошибка');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const singleGroup = useMemo(() => {
     if (selectedList.length !== 1) return null;
     const sg = selectedList[0];
@@ -412,13 +475,77 @@ export default function AdminGroupAccessTab({
         Оплаченный доступ не снимается.
       </div>
 
+      <div style={{
+        background: T.warnSoft, border: `1px solid ${T.warn}55`,
+        borderRadius: 12, padding: 12, marginBottom: 14,
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+          Весь контент всем
+        </div>
+        <div style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.45, marginBottom: 10 }}>
+          Откроет все предметы (вопросы, тесты, задачи, проверка, материалы) всем группам
+          всех факультетов, без срока.
+          {allTreeGroupCount > 0 && subjectCount > 0 && (
+            <> Сейчас в сетке {allTreeGroupCount} групп × {subjectCount} предметов.</>
+          )}
+        </div>
+        {confirmOpenAll ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: T.warn, lineHeight: 1.4 }}>
+              Точно открыть всё? Это нельзя отменить одной кнопкой — потом придётся закрывать по группам.
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                disabled={saving || allTreeGroupCount === 0}
+                onClick={() => void openAllContent()}
+                style={{
+                  flex: 1, padding: '10px 12px', borderRadius: 10, border: 'none',
+                  background: T.warn, color: '#fff', fontWeight: 700, fontSize: 13,
+                  cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
+                }}
+              >
+                {saving ? 'Открываем…' : 'Да, открыть всем'}
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setConfirmOpenAll(false)}
+                style={{
+                  flex: 1, padding: '10px 12px', borderRadius: 10,
+                  border: `1px solid ${T.border}`, background: T.surface,
+                  color: T.textMuted, fontWeight: 600, fontSize: 13,
+                  cursor: saving ? 'default' : 'pointer',
+                }}
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={saving || allTreeGroupCount === 0}
+            onClick={() => setConfirmOpenAll(true)}
+            style={{
+              width: '100%', padding: '10px 12px', borderRadius: 10, border: 'none',
+              background: T.warn, color: '#fff', fontWeight: 700, fontSize: 13,
+              cursor: saving || allTreeGroupCount === 0 ? 'default' : 'pointer',
+              opacity: saving || allTreeGroupCount === 0 ? 0.6 : 1,
+            }}
+          >
+            Открыть весь контент всем студентам
+          </button>
+        )}
+      </div>
+
       {/* Факультеты */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
         {(['stomatology', 'therapeutic', 'pediatrics'] as FacultyId[]).map(id => (
           <button
             key={id}
             type="button"
-            onClick={() => { setFacultyId(id); setSelectedGroups(new Set()); }}
+            onClick={() => { setFacultyId(id); setSelectedGroups(new Set()); setConfirmOpenAll(false); }}
             style={{
               padding: '8px 12px', borderRadius: 10, fontSize: 12, fontWeight: 700,
               border: `1px solid ${facultyId === id ? T.accent : T.border}`,
@@ -612,17 +739,47 @@ export default function AdminGroupAccessTab({
           />
           только с доступом
         </label>
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          disabled={visibleGroups.length === 0}
+          onClick={selectAllVisible}
+          style={{
+            padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+            border: `1px solid ${allVisibleSelected ? T.accent : T.border}`,
+            background: allVisibleSelected ? T.accentSoft : T.surface,
+            color: allVisibleSelected ? T.accent : T.textMuted,
+            cursor: visibleGroups.length === 0 ? 'default' : 'pointer',
+            opacity: visibleGroups.length === 0 ? 0.5 : 1,
+          }}
+        >
+          {allVisibleSelected ? 'Все выбраны' : `Выбрать всё (${visibleGroups.length})`}
+        </button>
+        <button
+          type="button"
+          disabled={facultyGroupCount === 0}
+          onClick={selectEntireFaculty}
+          style={{
+            padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 600,
+            border: `1px dashed ${T.accent}`, background: T.accentSoft, color: T.accent,
+            cursor: facultyGroupCount === 0 ? 'default' : 'pointer',
+            opacity: facultyGroupCount === 0 ? 0.5 : 1,
+          }}
+        >
+          Весь факультет ({facultyGroupCount})
+        </button>
         {selectedList.length > 0 && (
           <button
             type="button"
             onClick={() => setSelectedGroups(new Set())}
             style={{
-              padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+              padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 600,
               border: `1px solid ${T.border}`, background: T.surface,
               color: T.textMuted, cursor: 'pointer',
             }}
           >
-            Сбросить выбор ({selectedList.length})
+            Сбросить ({selectedList.length})
           </button>
         )}
       </div>
@@ -698,6 +855,9 @@ export default function AdminGroupAccessTab({
           <div style={{ fontSize: 11, color: T.textFaint, marginBottom: 8, lineHeight: 1.4 }}>
             Действие применяется только к отмеченным группам. После открытия выбор сбросится —
             можно отметить другие группы и другой предмет.
+            {selectedList.length > courseGroups.filter(g => selectedGroups.has(g.studyGroup)).length && (
+              <> В выбор входят группы других курсов этого факультета.</>
+            )}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
             <select

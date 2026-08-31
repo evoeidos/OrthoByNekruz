@@ -12,6 +12,8 @@ import {
   loadGroupAccessRules,
   saveGroupAccessRules,
   upsertGroupAccessRule,
+  upsertManyGroupAccessRules,
+  allContentGroupAccessModules,
   type GroupAccessDurationKind,
   type GroupAccessModule,
   normalizeModules,
@@ -160,6 +162,45 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ ok: true, synced });
     }
 
+    if (action === 'open_all_content') {
+      if (req.body.confirm !== true && req.body.confirm !== 'true') {
+        return res.status(400).json({ error: 'Подтверди открытие всего контента.' });
+      }
+
+      const overlay = await loadGroupCatalogOverlay(redis);
+      const tree = getAdminGroupAccessTree(rules, overlay);
+      const groups = collectTreeGroups(tree);
+      if (!groups.length) {
+        return res.status(400).json({ error: 'В сетке нет групп.' });
+      }
+
+      const modules = allContentGroupAccessModules();
+      const patches = groups.flatMap(g =>
+        SUBJECTS.map(s => ({
+          facultyId: g.facultyId,
+          studyGroup: g.studyGroup,
+          subjectId: s.id,
+          enabled: true,
+          modules,
+          durationKind: 'unlimited' as const,
+          lessonsRestricted: false,
+        })),
+      );
+
+      const next = upsertManyGroupAccessRules(rules, patches);
+      await saveGroupAccessRules(redis, next);
+      const synced = await syncAllUsers(next);
+
+      return res.status(200).json({
+        ok: true,
+        tree: getAdminGroupAccessTree(next, overlay),
+        groups: groups.length,
+        subjects: SUBJECTS.length,
+        rules: patches.length,
+        synced,
+      });
+    }
+
     return res.status(400).json({ error: 'Unknown action' });
   } catch (e) {
     console.error('[admin-group-access]', e);
@@ -260,4 +301,22 @@ async function syncAllUsers(
     }
   }
   return synced;
+}
+
+function collectTreeGroups(
+  tree: ReturnType<typeof getAdminGroupAccessTree>,
+): { facultyId: FacultyId; studyGroup: string }[] {
+  const out: { facultyId: FacultyId; studyGroup: string }[] = [];
+  const seen = new Set<string>();
+  for (const fac of tree) {
+    for (const course of fac.courses) {
+      for (const g of course.groups) {
+        const key = `${fac.facultyId}:${g.studyGroup}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ facultyId: fac.facultyId, studyGroup: g.studyGroup });
+      }
+    }
+  }
+  return out;
 }

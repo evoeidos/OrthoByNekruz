@@ -64,6 +64,11 @@ export function defaultGroupAccessModules(): GroupAccessModule[] {
   return [...DEFAULT_MODULES];
 }
 
+/** Вопросы, тесты, задачи, проверка и материалы — весь контент предмета. */
+export function allContentGroupAccessModules(): GroupAccessModule[] {
+  return [...ALL_MODULES];
+}
+
 export function buildRuleId(
   facultyId: FacultyId,
   studyGroup: string,
@@ -460,6 +465,37 @@ export function upsertGroupAccessRule(
     return copy;
   }
   return [...rules, next];
+}
+
+/** Массовое обновление правил без копирования массива на каждый патч. */
+export function upsertManyGroupAccessRules(
+  rules: GroupAccessRule[],
+  patches: Array<Parameters<typeof upsertGroupAccessRule>[1]>,
+): GroupAccessRule[] {
+  const byId = new Map(rules.map(r => [r.id, r]));
+  const now = new Date().toISOString();
+  for (const patch of patches) {
+    const studyGroup = normalizeStudyGroup(patch.studyGroup);
+    if (!studyGroup || !patch.facultyId || !patch.subjectId) continue;
+    const id = buildRuleId(patch.facultyId, studyGroup, patch.subjectId);
+    const prev = byId.get(id) ?? null;
+    byId.set(id, {
+      id,
+      facultyId: patch.facultyId,
+      studyGroup,
+      subjectId: patch.subjectId,
+      enabled: patch.enabled,
+      modules: normalizeModules(patch.modules ?? prev?.modules),
+      durationKind: patch.durationKind ?? prev?.durationKind ?? 'unlimited',
+      durationValue: patch.durationValue ?? prev?.durationValue,
+      examDate: patch.examDate ?? prev?.examDate,
+      note: patch.note ?? prev?.note,
+      lessonsRestricted: patch.lessonsRestricted ?? prev?.lessonsRestricted ?? false,
+      createdAt: prev?.createdAt ?? now,
+      updatedAt: now,
+    });
+  }
+  return [...byId.values()];
 }
 
 export function getAdminGroupAccessTree(
