@@ -50,8 +50,6 @@ export interface LessonSection {
   terms?: string[];
   /** Схемы и препараты подтемы — зум как в режиме чтения вопросов */
   images?: string[];
-  /** Интерактивный атлас: клик по латыни показывает точку на снимке */
-  atlas?: string;
 }
 
 export interface Lesson {
@@ -160,14 +158,12 @@ function normalizeSections(raw: unknown): LessonSection[] | undefined {
         : r.images ?? r.image,
       12,
     );
-    const atlas = String(r.atlas ?? '').trim();
     out.push({
       id: String(r.id ?? '').trim() || `s${i + 1}`,
       title,
       text,
       terms: normalizeStringList(r.terms, 40),
       images,
-      atlas: atlas || undefined,
     });
   });
   return out.length ? out : undefined;
@@ -348,7 +344,6 @@ function mergeSectionImages(stored: LessonSection, seed?: LessonSection): Lesson
   return {
     ...stored,
     images: stored.images?.length ? stored.images : seed.images,
-    atlas: stored.atlas || seed.atlas,
   };
 }
 

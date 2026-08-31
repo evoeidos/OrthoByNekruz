@@ -9,7 +9,6 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Lecture, Lesson, LessonKind, LessonSection } from '@/lib/curriculum';
 import { ReadingImages, useImageZoom } from '@/components/ImageZoom';
-import { TermAtlas } from '@/components/TermAtlas';
 
 // Локальная копия подписей: импорт значения из curriculum притащил бы в
 // клиентский бандл все планы кафедр из файлов.
@@ -826,8 +825,6 @@ function SectionPage({
       </div>
 
       <ReadingImages images={section.images} onZoom={onZoom} />
-
-      {section.atlas ? <TermAtlas atlasId={section.atlas} accent={accent} /> : null}
 
       {section.terms?.length ? (
         <div
