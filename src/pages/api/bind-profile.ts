@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
 import { resolveRequestIdentity } from '@/lib/resolveIdentity';
 import { KrasgmuAuthError, loginKrasgmu } from '@/lib/krasgmu/client';
+import { KrasgmuConfigError } from '@/lib/krasgmu/crypto';
 import { saveBinding } from '@/lib/krasgmu/store';
 
 const redis = createRedisFromEnv();
@@ -39,7 +40,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const status = e.code === 'invalid_credentials' ? 400 : 502;
       return res.status(status).json({ error: e.message, code: e.code });
     }
+    if (e instanceof KrasgmuConfigError) {
+      console.error('[bind-profile]', e.message);
+      return res.status(503).json({
+        error: 'Сервис не настроен: задайте KRASGMU_ENCRYPTION_KEY на сервере',
+        code: 'config_missing',
+      });
+    }
     console.error('[bind-profile]', e);
-    return res.status(500).json({ error: 'Не удалось привязать аккаунт' });
+    const detail = e instanceof Error ? e.message : String(e);
+    return res.status(500).json({
+      error: 'Не удалось привязать аккаунт',
+      code: 'internal_error',
+      detail: process.env.NODE_ENV === 'development' ? detail : undefined,
+    });
   }
 }

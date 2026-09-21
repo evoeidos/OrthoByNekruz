@@ -105,13 +105,23 @@ function extractLoginForm(html: string, pageUrl: string): {
   return { action: new URL(action, pageUrl).href, fields };
 }
 
+function isLoginFailurePage(html: string): boolean {
+  return /неверный логин/i.test(html) || /неверный пароль/i.test(html);
+}
+
+/** Страница деканата без авторизации содержит user_pass; после входа — нет. */
+function hasLoginForm(html: string): boolean {
+  return /name=['"]user_pass['"]/i.test(html) && /name=['"]user_name['"]/i.test(html);
+}
+
 function isLoggedIn(html: string): boolean {
+  if (isLoginFailurePage(html)) return false;
+  if (hasLoginForm(html)) return false;
   const lower = html.toLowerCase();
   return (
-    lower.includes('выход')
-    || lower.includes('logout')
-    || /page\[org\]=dean/i.test(html)
-    || /личный кабинет/i.test(html)
+    />\s*выход\s*</i.test(html)
+    || /href=[^>]+>\s*выход\s*</i.test(html)
+    || (/личный кабинет/i.test(html) && !isLoginFailurePage(html))
   );
 }
 
@@ -119,31 +129,23 @@ function isLoggedIn(html: string): boolean {
  * Авторизация на krasgmu.ru.
  * Сначала загружает страницу входа (CSRF/hidden-поля), затем POST с login/user_name/user_pass.
  */
+const DEAN_LOGIN_URL = `${BASE}/index.php?page%5Borg%5D=dean`;
+
 export async function loginKrasgmu(
   login: string,
   password: string,
 ): Promise<KrasgmuSessionCookies> {
   const jar: KrasgmuSessionCookies = {};
-  const loginUrls = [
-    `${BASE}/index.php`,
-    `${BASE}/`,
-  ];
 
-  let formInfo: ReturnType<typeof extractLoginForm> = null;
-  let landingHtml = '';
+  const page = await fetchRetry(DEAN_LOGIN_URL, jar);
+  const formInfo = extractLoginForm(page.body, page.url);
+  const postUrl = formInfo?.action || DEAN_LOGIN_URL;
 
-  for (const url of loginUrls) {
-    const page = await fetchRetry(url, jar);
-    landingHtml = page.body;
-    formInfo = extractLoginForm(page.body, page.url);
-    if (formInfo) break;
-  }
-
-  const postUrl = formInfo?.action || `${BASE}/index.php`;
   const body = new URLSearchParams(formInfo?.fields ?? {});
-  body.set('login', login);
   body.set('user_name', login);
   body.set('user_pass', password);
+  // name='login' — кнопка «ВХОД», не логин пользователя
+  body.set('login', '');
 
   const res = await fetchRetry(postUrl, jar, {
     method: 'POST',
@@ -151,16 +153,18 @@ export async function loginKrasgmu(
     body: body.toString(),
   });
 
+  if (isLoginFailurePage(res.body)) {
+    throw new KrasgmuAuthError('Неверный логин или пароль', 'invalid_credentials');
+  }
   if (isLoggedIn(res.body)) return jar;
 
-  // Иногда редирект не содержит «Выход» — проверяем кабинет
-  const cabinet = await fetchRetry(
-    `${BASE}/index.php?page%5Borg%5D=dean`,
-    jar,
-  );
+  const cabinet = await fetchRetry(DEAN_LOGIN_URL, jar);
+  if (isLoginFailurePage(cabinet.body)) {
+    throw new KrasgmuAuthError('Неверный логин или пароль', 'invalid_credentials');
+  }
   if (isLoggedIn(cabinet.body)) return jar;
 
-  if (!formInfo && !landingHtml.includes('user_pass') && !landingHtml.includes('password')) {
+  if (!page.body.includes('user_pass') && !page.body.includes('user_name')) {
     console.error('[krasgmu] Login form not found — site layout may have changed');
     throw new KrasgmuAuthError(
       'Сайт КрасГМУ изменил форму входа. Попробуйте позже.',

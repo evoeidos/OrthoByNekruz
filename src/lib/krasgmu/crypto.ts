@@ -9,10 +9,19 @@ function deriveKey(secret: string, salt: Buffer): Buffer {
   return scryptSync(secret, salt, 32);
 }
 
+export class KrasgmuConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'KrasgmuConfigError';
+  }
+}
+
 function getSecret(): string {
   const key = process.env.KRASGMU_ENCRYPTION_KEY?.trim();
   if (!key || key.length < 16) {
-    throw new Error('KRASGMU_ENCRYPTION_KEY is missing or too short (min 16 chars)');
+    throw new KrasgmuConfigError(
+      'KRASGMU_ENCRYPTION_KEY is missing or too short (min 16 chars)',
+    );
   }
   return key;
 }
