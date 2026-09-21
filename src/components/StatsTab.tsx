@@ -15,6 +15,7 @@ import { loadSubjectData } from '@/lib/subjectData';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ExamScreen, loadExamHistory, ExamHistoryEntry } from './ExamScreen';
 import { ResourcesSheet } from './ResourcesSheet';
+import { KrasgmuBindPanel } from './KrasgmuBindPanel';
 import {
   buildExamTicketsForSubject,
   getExamTicketCompositionLabel,
@@ -602,6 +603,9 @@ export const StatsTab: React.FC<StatsTabProps> = ({
                 </div>
               ))}
             </div>
+
+            {/* ─── ПРИВЯЗКА КРАСГМУ ─── */}
+            <KrasgmuBindPanel />
 
             {/* ─── ПРОВЕРКА ГОТОВНОСТИ + ГРАФИК ─── */}
             {!examHidden && (
