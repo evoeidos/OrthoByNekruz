@@ -58,7 +58,8 @@ export function parseGradesHtml(html: string): KrasgmuGradeRow[] {
   const $ = cheerio.load(html);
   const rows: KrasgmuGradeRow[] = [];
 
-  $('table').each((_, table) => {
+  const tables = $('table.tdata').length > 0 ? $('table.tdata') : $('table');
+  tables.each((_, table) => {
     $(table).find('tr').slice(1).each((__, row) => {
       const cells = $(row).find('td').map((___, c) => cleanText($(c).text())).get();
       if (cells.length < 2) return;

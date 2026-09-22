@@ -1,22 +1,15 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { bindUniversityAccount } from '@/lib/krasgmu/bindAccount';
 import { createRedisFromEnv } from '@/lib/redis';
 import { resolveRequestIdentity } from '@/lib/resolveIdentity';
-import { KrasgmuAuthError, loginKrasgmu } from '@/lib/krasgmu/client';
-import { KrasgmuConfigError } from '@/lib/krasgmu/crypto';
-import { saveBinding } from '@/lib/krasgmu/store';
 
 const redis = createRedisFromEnv();
 
+/** @deprecated Используйте POST /api/auth/university (App Router) */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { telegramId, initData, login, password } = req.body ?? {};
-  const loginStr = String(login ?? '').trim();
-  const passStr = String(password ?? '');
-
-  if (!loginStr || !passStr) {
-    return res.status(400).json({ error: 'Укажите логин и пароль' });
-  }
 
   const identity = await resolveRequestIdentity(redis, req, {
     telegramId,
@@ -27,32 +20,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(identity.status).json({ error: identity.error, code: identity.code });
   }
 
-  try {
-    const cookies = await loginKrasgmu(loginStr, passStr);
-    await saveBinding(redis, identity.tgId, loginStr, passStr, cookies);
-    return res.status(200).json({
-      success: true,
-      message: 'Аккаунт КрасГМУ успешно привязан',
-      login: loginStr,
-    });
-  } catch (e) {
-    if (e instanceof KrasgmuAuthError) {
-      const status = e.code === 'invalid_credentials' ? 400 : 502;
-      return res.status(status).json({ error: e.message, code: e.code });
-    }
-    if (e instanceof KrasgmuConfigError) {
-      console.error('[bind-profile]', e.message);
-      return res.status(503).json({
-        error: 'Сервис не настроен: задайте KRASGMU_ENCRYPTION_KEY на сервере',
-        code: 'config_missing',
-      });
-    }
-    console.error('[bind-profile]', e);
-    const detail = e instanceof Error ? e.message : String(e);
-    return res.status(500).json({
-      error: 'Не удалось привязать аккаунт',
-      code: 'internal_error',
-      detail: process.env.NODE_ENV === 'development' ? detail : undefined,
+  const result = await bindUniversityAccount(
+    redis,
+    identity.tgId,
+    String(login ?? ''),
+    String(password ?? ''),
+  );
+  if (!result.ok) {
+    return res.status(result.status).json({
+      error: result.error,
+      code: result.code,
+      detail: result.detail,
     });
   }
+
+  return res.status(200).json({
+    success: true,
+    message: result.message,
+    login: result.login,
+  });
 }

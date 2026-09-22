@@ -1,17 +1,13 @@
 import * as cheerio from 'cheerio';
+import { KrasgmuAuthError } from '@/lib/krasgmu/errors';
 import type { KrasgmuSessionCookies } from '@/lib/krasgmu/types';
+
+export { KrasgmuAuthError } from '@/lib/krasgmu/errors';
 
 const BASE = 'https://krasgmu.ru';
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
   + '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-export class KrasgmuAuthError extends Error {
-  constructor(message: string, readonly code: 'invalid_credentials' | 'form_changed' | 'network') {
-    super(message);
-    this.name = 'KrasgmuAuthError';
-  }
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
