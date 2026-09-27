@@ -37,6 +37,19 @@ export type KrasgmuGradeRow = {
   kind: string;
 };
 
+export type KrasgmuProfile = {
+  fullName: string;
+  /** «31.05.03 Стоматология (очное, высшее образование, 5,00)» */
+  specialty: string;
+  course: string;
+  group: string;
+  enrollYear: string;
+  gradebook: string;
+  category: string;
+  /** «Задолжник» и т.п., пусто если нет статуса */
+  status: string;
+};
+
 export type KrasgmuBindStatus =
   | { bound: false }
   | {

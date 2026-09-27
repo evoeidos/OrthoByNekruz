@@ -1,8 +1,54 @@
 import * as cheerio from 'cheerio';
-import type { KrasgmuGradeRow, KrasgmuScheduleDay, KrasgmuScheduleLesson } from '@/lib/krasgmu/types';
+import type {
+  KrasgmuGradeRow,
+  KrasgmuProfile,
+  KrasgmuScheduleDay,
+  KrasgmuScheduleLesson,
+} from '@/lib/krasgmu/types';
 
 function cleanText(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Парсинг персональных данных (page[common]=user, без id — сессия резолвит
+ * на самого залогиненного студента). ФИО — в '.pagetitle', остальное —
+ * в key-value таблице 'table.keyval' («Обучение в КрасГМУ сейчас»).
+ */
+export function parseProfileHtml(html: string): KrasgmuProfile | null {
+  const $ = cheerio.load(html);
+
+  const nameNode = $('.pagetitle').first().clone();
+  nameNode.find('span').remove();
+  const fullName = cleanText(nameNode.text());
+  if (!fullName) return null;
+
+  const info: Record<string, string> = {};
+  $('table.keyval tr').each((_, tr) => {
+    const tds = $(tr).find('td');
+    if (tds.length < 2) return;
+    const label = cleanText($(tds.get(0)).text()).replace(/:$/, '');
+    const valueCell = $(tds.get(1)).clone();
+    // убираем служебные ссылки вроде "Модуль ДЗ" / "Электронный кабинет студента"
+    valueCell.find('a').each((__, a) => {
+      const $a = $(a);
+      if (/модуль дз|электронный кабинет/i.test($a.text())) $a.remove();
+    });
+    info[label] = cleanText(valueCell.text());
+  });
+
+  const [course, group] = (info['Курс, группа'] || '').split('/').map(cleanText);
+
+  return {
+    fullName,
+    specialty: info['Направление'] || '',
+    course: course || '',
+    group: group || '',
+    enrollYear: info['Год поступления'] || '',
+    gradebook: info['Зачетная книжка'] || '',
+    category: info['Категория'] || '',
+    status: info['СТАТУС'] || '',
+  };
 }
 
 /**

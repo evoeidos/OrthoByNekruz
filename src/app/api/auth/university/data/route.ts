@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { deleteBinding, getBindStatus } from '@/lib/krasgmu/store';
 import {
   fetchUniversityGrades,
+  fetchUniversityProfile,
   fetchUniversitySchedule,
 } from '@/lib/universityParser';
 import { isKrasgmuAuthError } from '@/lib/krasgmu/errors';
@@ -61,16 +62,22 @@ export async function POST(req: Request) {
       const data = await fetchUniversityGrades(redis, identity.tgId);
       return NextResponse.json({ success: true, ...data });
     }
+    if (act === 'profile') {
+      const data = await fetchUniversityProfile(redis, identity.tgId);
+      return NextResponse.json({ success: true, ...data });
+    }
     if (act === 'all') {
-      const [scheduleData, gradesData] = await Promise.all([
+      const [scheduleData, gradesData, profileData] = await Promise.all([
         fetchUniversitySchedule(redis, identity.tgId),
         fetchUniversityGrades(redis, identity.tgId),
+        fetchUniversityProfile(redis, identity.tgId),
       ]);
       return NextResponse.json({
         success: true,
         login: scheduleData.login,
         schedule: scheduleData.schedule,
         grades: gradesData.grades,
+        profile: profileData.profile,
       });
     }
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });

@@ -6,7 +6,7 @@ import {
   loginKrasgmu,
   validateSession,
 } from '@/lib/krasgmu/client';
-import { parseGradesHtml, parseScheduleHtml } from '@/lib/krasgmu/parser';
+import { parseGradesHtml, parseProfileHtml, parseScheduleHtml } from '@/lib/krasgmu/parser';
 import {
   getBinding,
   loadPassword,
@@ -14,7 +14,7 @@ import {
   saveBinding,
   touchValidated,
 } from '@/lib/krasgmu/store';
-import type { KrasgmuGradeRow, KrasgmuScheduleDay } from '@/lib/krasgmu/types';
+import type { KrasgmuGradeRow, KrasgmuProfile, KrasgmuScheduleDay } from '@/lib/krasgmu/types';
 
 // Личный кабинет живёт на page[common]=user (не page[org]=dean — та страница
 // чисто информационная и не персонализируется). id — цифры из логина ('z93339' -> '93339').
@@ -25,6 +25,8 @@ const gradesPath = (login: string) =>
 // С валидной сессией эта же страница деканата автоматически показывает расписание
 // группы студента (подтверждено вживую) — отдельный персональный URL не нужен.
 const SCHEDULE_PATH = '/index.php?page%5Borg%5D=dean&cat=schedule';
+// Без id сессия резолвит на самого залогиненного студента — ФИО, курс, группа и т.д.
+const PROFILE_PATH = '/index.php?page%5Bcommon%5D=user';
 
 export async function ensureKrasgmuSession(
   redis: AppRedis,
@@ -64,4 +66,13 @@ export async function fetchKrasgmuGrades(
   const { cookies, login } = await ensureKrasgmuSession(redis, tgId);
   const html = await fetchKrasgmuPage(gradesPath(login), cookies);
   return { login, grades: parseGradesHtml(html) };
+}
+
+export async function fetchKrasgmuProfile(
+  redis: AppRedis,
+  tgId: string,
+): Promise<{ login: string; profile: KrasgmuProfile | null }> {
+  const { cookies, login } = await ensureKrasgmuSession(redis, tgId);
+  const html = await fetchKrasgmuPage(PROFILE_PATH, cookies);
+  return { login, profile: parseProfileHtml(html) };
 }

@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Loader2, Link2, Unlink, Calendar, GraduationCap, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, Link2, Unlink, Calendar, GraduationCap, ChevronDown, ChevronUp, User } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import type { UniversityGradeRow, UniversityScheduleDay } from '@/lib/universityParser';
+import type { UniversityGradeRow, UniversityProfile, UniversityScheduleDay } from '@/lib/universityParser';
 
 type BindPhase = 'idle' | 'loading' | 'success' | 'error';
 
@@ -25,6 +25,7 @@ export const BindUniversityForm: React.FC = () => {
   const [checking, setChecking] = useState(true);
   const [schedule, setSchedule] = useState<UniversityScheduleDay[]>([]);
   const [grades, setGrades] = useState<UniversityGradeRow[]>([]);
+  const [profile, setProfile] = useState<UniversityProfile | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [showGrades, setShowGrades] = useState(false);
 
@@ -68,6 +69,7 @@ export const BindUniversityForm: React.FC = () => {
       if (!r.ok) throw new Error(d.error || 'Ошибка загрузки');
       setSchedule(d.schedule ?? []);
       setGrades(d.grades ?? []);
+      setProfile(d.profile ?? null);
       if (d.login) setBoundLogin(d.login);
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'Не удалось загрузить данные');
@@ -124,6 +126,7 @@ export const BindUniversityForm: React.FC = () => {
     setBoundLogin('');
     setSchedule([]);
     setGrades([]);
+    setProfile(null);
     setPhase('idle');
   };
 
@@ -174,6 +177,54 @@ export const BindUniversityForm: React.FC = () => {
                 </div>
               )}
 
+              {profile && (
+                <div className="rounded-[12px] p-3 space-y-1.5" style={{ background: 'var(--c-bg-subtle)' }}>
+                  <div className="flex items-center gap-2 text-[13px] font-bold" style={{ color: 'var(--c-text)' }}>
+                    <User className="w-4 h-4" style={{ color: 'var(--c-primary)' }} />
+                    {profile.fullName}
+                  </div>
+                  {profile.specialty && (
+                    <div className="text-[11.5px]" style={{ color: 'var(--c-muted)' }}>
+                      {profile.specialty}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {profile.course && profile.group && (
+                      <span
+                        className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
+                        style={{ background: 'var(--c-card)', color: 'var(--c-text)' }}
+                      >
+                        {profile.course} курс · гр. {profile.group}
+                      </span>
+                    )}
+                    {profile.gradebook && (
+                      <span
+                        className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
+                        style={{ background: 'var(--c-card)', color: 'var(--c-text)' }}
+                      >
+                        Зачётка {profile.gradebook}
+                      </span>
+                    )}
+                    {profile.category && (
+                      <span
+                        className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
+                        style={{ background: 'var(--c-card)', color: 'var(--c-text)' }}
+                      >
+                        {profile.category}
+                      </span>
+                    )}
+                  </div>
+                  {profile.status && (
+                    <div
+                      className="text-[11.5px] font-bold px-2 py-1.5 rounded-[10px] mt-1"
+                      style={{ background: 'color-mix(in srgb, var(--c-danger) 12%, transparent)', color: 'var(--c-danger)' }}
+                    >
+                      {profile.status}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--c-muted)' }}>
                   <Calendar className="w-3.5 h-3.5" /> Расписание
@@ -198,6 +249,11 @@ export const BindUniversityForm: React.FC = () => {
                             {(les.type || les.room || les.teacher) && (
                               <div className="mt-0.5" style={{ color: 'var(--c-muted)' }}>
                                 {[les.type, les.room, les.teacher].filter(Boolean).join(' · ')}
+                              </div>
+                            )}
+                            {les.dates && (
+                              <div className="mt-0.5 text-[10.5px]" style={{ color: 'var(--c-text-faint)' }}>
+                                {les.dates}
                               </div>
                             )}
                           </div>
@@ -225,11 +281,27 @@ export const BindUniversityForm: React.FC = () => {
                   {grades.slice(0, 30).map((g, i) => (
                     <div
                       key={i}
-                      className="flex items-center justify-between gap-2 px-3 py-2 text-[12px]"
+                      className="flex items-start justify-between gap-2 px-3 py-2 text-[12px]"
                       style={{ borderTop: i ? '1px solid var(--c-border)' : undefined }}
                     >
-                      <span style={{ color: 'var(--c-text)' }}>{g.subject}</span>
-                      <span className="font-bold font-mono" style={{ color: 'var(--c-primary)' }}>{g.grade}</span>
+                      <div className="min-w-0">
+                        <div style={{ color: 'var(--c-text)' }}>{g.subject}</div>
+                        <div className="mt-0.5 text-[10.5px]" style={{ color: 'var(--c-text-faint)' }}>
+                          {[g.date, g.kind, g.teacher].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
+                      <span
+                        className="font-bold font-mono flex-shrink-0"
+                        style={{
+                          color: g.grade === 'Неявка'
+                            ? 'var(--c-danger)'
+                            : g.grade === 'Явка'
+                              ? 'var(--c-muted)'
+                              : 'var(--c-primary)',
+                        }}
+                      >
+                        {g.grade}
+                      </span>
                     </div>
                   ))}
                 </div>
