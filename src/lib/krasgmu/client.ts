@@ -1,4 +1,4 @@
-import * as cheerio from 'cheerio';
+import { loginKrasgmuViaBrowser } from '@/lib/krasgmu/browserLogin';
 import { KrasgmuAuthError } from '@/lib/krasgmu/errors';
 import type { KrasgmuSessionCookies } from '@/lib/krasgmu/types';
 
@@ -13,11 +13,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
-function parseSetCookie(header: string | null, jar: KrasgmuSessionCookies): void {
-  if (!header) return;
-  const parts = header.split(/,(?=[^;]+?=)/);
-  for (const part of parts) {
-    const seg = part.split(';')[0]?.trim();
+/** Извлекает id студента (число) из логина вида 'z93339' — используется в URL личного кабинета. */
+export function deriveStudentId(login: string): string {
+  return login.replace(/^\D+/, '');
+}
+
+function applySetCookie(res: Response, jar: KrasgmuSessionCookies): void {
+  const values = res.headers.getSetCookie?.() ?? [];
+  for (const raw of values) {
+    const seg = raw.split(';')[0]?.trim();
     const eq = seg?.indexOf('=');
     if (eq && eq > 0) {
       const name = seg!.slice(0, eq).trim();
@@ -35,6 +39,25 @@ function cookieHeader(jar: KrasgmuSessionCookies): string {
 
 type FetchResult = { body: string; status: number; url: string };
 
+/** Заголовки, похожие на настоящий Chrome — снижает шанс, что DDoS-Guard придирается к обычным GET. */
+function browserLikeHeaders(): Record<string, string> {
+  return {
+    Accept:
+      'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+    'Upgrade-Insecure-Requests': '1',
+    'sec-ch-ua': '"Chromium";v="120", "Not(A:Brand";v="24", "Google Chrome";v="120"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-fetch-dest': 'document',
+    'sec-fetch-mode': 'navigate',
+    'sec-fetch-site': 'same-origin',
+    'sec-fetch-user': '?1',
+  };
+}
+
 async function fetchWithCookies(
   url: string,
   jar: KrasgmuSessionCookies,
@@ -42,14 +65,14 @@ async function fetchWithCookies(
 ): Promise<FetchResult> {
   const headers = new Headers(init.headers);
   headers.set('User-Agent', UA);
-  headers.set('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
-  headers.set('Accept-Language', 'ru-RU,ru;q=0.9,en;q=0.8');
+  for (const [name, value] of Object.entries(browserLikeHeaders())) {
+    if (!headers.has(name)) headers.set(name, value);
+  }
   const ck = cookieHeader(jar);
   if (ck) headers.set('Cookie', ck);
 
   const res = await fetch(url, { ...init, headers, redirect: 'follow' });
-  const setCookie = res.headers.get('set-cookie');
-  parseSetCookie(setCookie, jar);
+  applySetCookie(res, jar);
 
   const body = await res.text();
   return { body, status: res.status, url: res.url };
@@ -76,99 +99,28 @@ async function fetchRetry(
   );
 }
 
-function extractLoginForm(html: string, pageUrl: string): {
-  action: string;
-  fields: Record<string, string>;
-} | null {
-  const $ = cheerio.load(html);
-  const form = $('form').filter((_, el) => {
-    const hasPass = $(el).find('input[type="password"]').length > 0;
-    const hasUser = $(el).find('input[name="login"], input[name="user_name"]').length > 0;
-    return hasPass && hasUser;
-  }).first();
-
-  if (!form.length) return null;
-
-  const action = form.attr('action') || pageUrl;
-  const fields: Record<string, string> = {};
-  form.find('input').each((_, el) => {
-    const name = $(el).attr('name');
-    if (!name) return;
-    const type = ($(el).attr('type') || 'text').toLowerCase();
-    if (type === 'submit' || type === 'button' || type === 'image') return;
-    fields[name] = $(el).attr('value') || '';
-  });
-  return { action: new URL(action, pageUrl).href, fields };
-}
-
 function isLoginFailurePage(html: string): boolean {
   return /неверный логин/i.test(html) || /неверный пароль/i.test(html);
 }
 
-/** Страница деканата без авторизации содержит user_pass; после входа — нет. */
-function hasLoginForm(html: string): boolean {
-  return /name=['"]user_pass['"]/i.test(html) && /name=['"]user_name['"]/i.test(html);
-}
-
-function isLoggedIn(html: string): boolean {
-  if (isLoginFailurePage(html)) return false;
-  if (hasLoginForm(html)) return false;
-  const lower = html.toLowerCase();
-  return (
-    />\s*выход\s*</i.test(html)
-    || /href=[^>]+>\s*выход\s*</i.test(html)
-    || (/личный кабинет/i.test(html) && !isLoginFailurePage(html))
-  );
+/** Появляется на личных страницах, когда сессия не даёт прав на раздел (в т.ч. когда сессия не авторизована). */
+function isAccessDeniedPage(html: string): boolean {
+  return /недостаточно прав доступа/i.test(html);
 }
 
 /**
  * Авторизация на krasgmu.ru.
- * Сначала загружает страницу входа (CSRF/hidden-поля), затем POST с login/user_name/user_pass.
+ * Сайт за DDoS-Guard: обычный fetch()-POST на форму логина принимается с кодом 200,
+ * но не выдаёт cookie 'krasgmu.auth' — TLS/HTTP-отпечаток Node не проходит проверку
+ * бэкенда для чувствительного действия (подтверждено побайтовым сравнением с DevTools).
+ * Поэтому сам вход выполняется через headless-браузер (browserLogin.ts); дальше все
+ * страницы (расписание, оценки) читаются обычным fetch() — эти GET DDoS-Guard пропускает.
  */
-const DEAN_LOGIN_URL = `${BASE}/index.php?page%5Borg%5D=dean`;
-
 export async function loginKrasgmu(
   login: string,
   password: string,
 ): Promise<KrasgmuSessionCookies> {
-  const jar: KrasgmuSessionCookies = {};
-
-  const page = await fetchRetry(DEAN_LOGIN_URL, jar);
-  const formInfo = extractLoginForm(page.body, page.url);
-  const postUrl = formInfo?.action || DEAN_LOGIN_URL;
-
-  const body = new URLSearchParams(formInfo?.fields ?? {});
-  body.set('user_name', login);
-  body.set('user_pass', password);
-  // name='login' — кнопка «ВХОД», не логин пользователя
-  body.set('login', '');
-
-  const res = await fetchRetry(postUrl, jar, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
-
-  if (isLoginFailurePage(res.body)) {
-    throw new KrasgmuAuthError('Неверный логин или пароль', 'invalid_credentials');
-  }
-  if (isLoggedIn(res.body)) return jar;
-
-  const cabinet = await fetchRetry(DEAN_LOGIN_URL, jar);
-  if (isLoginFailurePage(cabinet.body)) {
-    throw new KrasgmuAuthError('Неверный логин или пароль', 'invalid_credentials');
-  }
-  if (isLoggedIn(cabinet.body)) return jar;
-
-  if (!page.body.includes('user_pass') && !page.body.includes('user_name')) {
-    console.error('[krasgmu] Login form not found — site layout may have changed');
-    throw new KrasgmuAuthError(
-      'Сайт КрасГМУ изменил форму входа. Попробуйте позже.',
-      'form_changed',
-    );
-  }
-
-  throw new KrasgmuAuthError('Неверный логин или пароль', 'invalid_credentials');
+  return loginKrasgmuViaBrowser(login, password);
 }
 
 export async function fetchKrasgmuPage(
@@ -177,16 +129,21 @@ export async function fetchKrasgmuPage(
 ): Promise<string> {
   const url = path.startsWith('http') ? path : `${BASE}${path.startsWith('/') ? '' : '/'}${path}`;
   const res = await fetchRetry(url, { ...cookies }, {});
-  if (!isLoggedIn(res.body) && res.body.includes('user_pass')) {
+  if (isLoginFailurePage(res.body) || isAccessDeniedPage(res.body)) {
     throw new KrasgmuAuthError('Сессия истекла — войдите снова', 'invalid_credentials');
   }
   return res.body;
 }
 
-export async function validateSession(cookies: KrasgmuSessionCookies): Promise<boolean> {
+export async function validateSession(
+  cookies: KrasgmuSessionCookies,
+  login: string,
+): Promise<boolean> {
+  if (!cookies['krasgmu.auth']) return false;
   try {
-    const html = await fetchKrasgmuPage('/index.php?page%5Borg%5D=dean', cookies);
-    return isLoggedIn(html);
+    const id = deriveStudentId(login);
+    await fetchKrasgmuPage(`/index.php?page%5Bcommon%5D=user&id=${id}&cat=student&what=mark`, cookies);
+    return true;
   } catch {
     return false;
   }

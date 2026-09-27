@@ -1,5 +1,8 @@
 export class KrasgmuAuthError extends Error {
-  constructor(message: string, readonly code: 'invalid_credentials' | 'form_changed' | 'network') {
+  constructor(
+    message: string,
+    readonly code: 'invalid_credentials' | 'form_changed' | 'network' | 'browser_unavailable',
+  ) {
     super(message);
     this.name = 'KrasgmuAuthError';
   }

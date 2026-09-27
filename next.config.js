@@ -4,7 +4,9 @@ const nextConfig = {
   // (Maximum call stack size exceeded при обходе node_modules на Vercel).
   outputFileTracing: false,
   experimental: {
-    serverComponentsExternalPackages: ['cheerio'],
+    // playwright — нативный биндинг для headless-браузера (вход на krasgmu.ru),
+    // не должен попадать в webpack-бандл серверных компонентов.
+    serverComponentsExternalPackages: ['cheerio', 'playwright'],
   },
   env: {
     // Хеш коммита текущего деплоя — попадает в клиентский бандл и используется

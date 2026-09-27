@@ -1,6 +1,7 @@
 import type { AppRedis } from '@/lib/redis';
 import {
   KrasgmuAuthError,
+  deriveStudentId,
   fetchKrasgmuPage,
   loginKrasgmu,
   validateSession,
@@ -15,8 +16,15 @@ import {
 } from '@/lib/krasgmu/store';
 import type { KrasgmuGradeRow, KrasgmuScheduleDay } from '@/lib/krasgmu/types';
 
+// Личный кабинет живёт на page[common]=user (не page[org]=dean — та страница
+// чисто информационная и не персонализируется). id — цифры из логина ('z93339' -> '93339').
+// Сам журнал оценок/посещаемости подгружается на странице через AJAX (клик по году),
+// а не отдаётся в HTML вкладки — бьём напрямую в этот эндпоинт с текущим годом.
+const gradesPath = (login: string) =>
+  `/index.php?page%5Bdean%5D=ajax_journal_year&y=${new Date().getFullYear()}&id=${deriveStudentId(login)}`;
+// С валидной сессией эта же страница деканата автоматически показывает расписание
+// группы студента (подтверждено вживую) — отдельный персональный URL не нужен.
 const SCHEDULE_PATH = '/index.php?page%5Borg%5D=dean&cat=schedule';
-const GRADES_PATH = '/index.php?page%5Borg%5D=dean&cat=progress';
 
 export async function ensureKrasgmuSession(
   redis: AppRedis,
@@ -28,7 +36,7 @@ export async function ensureKrasgmuSession(
   }
 
   let cookies = loadSessionCookies(binding);
-  const valid = await validateSession(cookies);
+  const valid = await validateSession(cookies, binding.universityLogin);
   if (valid) {
     await touchValidated(redis, tgId);
     return { cookies, login: binding.universityLogin };
@@ -54,6 +62,6 @@ export async function fetchKrasgmuGrades(
   tgId: string,
 ): Promise<{ login: string; grades: KrasgmuGradeRow[] }> {
   const { cookies, login } = await ensureKrasgmuSession(redis, tgId);
-  const html = await fetchKrasgmuPage(GRADES_PATH, cookies);
+  const html = await fetchKrasgmuPage(gradesPath(login), cookies);
   return { login, grades: parseGradesHtml(html) };
 }

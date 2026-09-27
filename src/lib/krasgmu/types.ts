@@ -12,9 +12,12 @@ export type KrasgmuBindingRecord = {
 export type KrasgmuScheduleLesson = {
   time: string;
   subject: string;
+  /** ЛЕКЦИЯ / пусто (практика или без явного типа) */
   type: string;
   room: string;
   teacher: string;
+  /** Конкретные календарные даты повторения (сайт отдаёт недельный шаблон + список дат) */
+  dates?: string;
 };
 
 export type KrasgmuScheduleDay = {
@@ -24,10 +27,14 @@ export type KrasgmuScheduleDay = {
 };
 
 export type KrasgmuGradeRow = {
+  /** Название предмета + тема занятия (напр. «Стоматология — Мандибулярная анестезия») */
   subject: string;
+  /** Явка / Неявка / оценка (2-5, в т.ч. дробная «4,5») / Перезачет */
   grade: string;
   date: string;
   teacher: string;
+  /** ЛЕКЦИЯ / ПРАКТИЧЕСКИЕ ЗАНЯТИЯ / ПРАКТИЧЕСКИЕ УМЕНИЯ */
+  kind: string;
 };
 
 export type KrasgmuBindStatus =
