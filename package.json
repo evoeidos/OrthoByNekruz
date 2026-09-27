@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "playwright install chromium || true"
+    "postinstall": "playwright install chromium || true; playwright install-deps chromium || true"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",
