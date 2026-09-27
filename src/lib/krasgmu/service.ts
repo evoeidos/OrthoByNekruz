@@ -2,6 +2,7 @@ import type { AppRedis } from '@/lib/redis';
 import {
   KrasgmuAuthError,
   deriveStudentId,
+  fetchKrasgmuBinary,
   fetchKrasgmuPage,
   loginKrasgmu,
   validateSession,
@@ -27,6 +28,8 @@ const gradesPath = (login: string) =>
 const SCHEDULE_PATH = '/index.php?page%5Borg%5D=dean&cat=schedule';
 // Без id сессия резолвит на самого залогиненного студента — ФИО, курс, группа и т.д.
 const PROFILE_PATH = '/index.php?page%5Bcommon%5D=user';
+// Фото профиля лежит по прямому пути от id студента (подтверждено вживую).
+const photoPath = (login: string) => `/sys/images/user/${deriveStudentId(login)}.jpg`;
 
 export async function ensureKrasgmuSession(
   redis: AppRedis,
@@ -75,4 +78,12 @@ export async function fetchKrasgmuProfile(
   const { cookies, login } = await ensureKrasgmuSession(redis, tgId);
   const html = await fetchKrasgmuPage(PROFILE_PATH, cookies);
   return { login, profile: parseProfileHtml(html) };
+}
+
+export async function fetchKrasgmuPhoto(
+  redis: AppRedis,
+  tgId: string,
+): Promise<{ buffer: ArrayBuffer; contentType: string }> {
+  const { cookies, login } = await ensureKrasgmuSession(redis, tgId);
+  return fetchKrasgmuBinary(photoPath(login), cookies);
 }

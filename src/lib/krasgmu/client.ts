@@ -135,6 +135,26 @@ export async function fetchKrasgmuPage(
   return res.body;
 }
 
+export async function fetchKrasgmuBinary(
+  path: string,
+  cookies: KrasgmuSessionCookies,
+): Promise<{ buffer: ArrayBuffer; contentType: string }> {
+  const url = path.startsWith('http') ? path : `${BASE}${path.startsWith('/') ? '' : '/'}${path}`;
+  const headers = new Headers();
+  headers.set('User-Agent', UA);
+  for (const [name, value] of Object.entries(browserLikeHeaders())) headers.set(name, value);
+  const ck = cookieHeader(cookies);
+  if (ck) headers.set('Cookie', ck);
+
+  const res = await fetch(url, { headers, redirect: 'follow' });
+  if (!res.ok) {
+    throw new KrasgmuAuthError('Не удалось загрузить файл', 'network');
+  }
+  const buffer = await res.arrayBuffer();
+  const contentType = res.headers.get('content-type') || 'application/octet-stream';
+  return { buffer, contentType };
+}
+
 export async function validateSession(
   cookies: KrasgmuSessionCookies,
   login: string,

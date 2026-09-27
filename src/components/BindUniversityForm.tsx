@@ -26,8 +26,30 @@ export const BindUniversityForm: React.FC = () => {
   const [schedule, setSchedule] = useState<UniversityScheduleDay[]>([]);
   const [grades, setGrades] = useState<UniversityGradeRow[]>([]);
   const [profile, setProfile] = useState<UniversityProfile | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [showGrades, setShowGrades] = useState(false);
+
+  useEffect(() => {
+    return () => { if (photoUrl) URL.revokeObjectURL(photoUrl); };
+  }, [photoUrl]);
+
+  const loadPhoto = useCallback(async () => {
+    try {
+      const { telegram_id, initData } = getTelegramAuth();
+      const r = await fetch('/api/auth/university/photo', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telegram_id, initData }),
+      });
+      if (!r.ok) return;
+      const blob = await r.blob();
+      setPhotoUrl(URL.createObjectURL(blob));
+    } catch {
+      // фото необязательно — молча пропускаем
+    }
+  }, []);
 
   const loadStatus = useCallback(async () => {
     setChecking(true);
@@ -71,12 +93,13 @@ export const BindUniversityForm: React.FC = () => {
       setGrades(d.grades ?? []);
       setProfile(d.profile ?? null);
       if (d.login) setBoundLogin(d.login);
+      void loadPhoto();
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'Не удалось загрузить данные');
     } finally {
       setDataLoading(false);
     }
-  }, []);
+  }, [loadPhoto]);
 
   useEffect(() => { void loadStatus(); }, [loadStatus]);
 
@@ -127,6 +150,7 @@ export const BindUniversityForm: React.FC = () => {
     setSchedule([]);
     setGrades([]);
     setProfile(null);
+    setPhotoUrl(null);
     setPhase('idle');
   };
 
@@ -179,9 +203,26 @@ export const BindUniversityForm: React.FC = () => {
 
               {profile && (
                 <div className="rounded-[12px] p-3 space-y-1.5" style={{ background: 'var(--c-bg-subtle)' }}>
-                  <div className="flex items-center gap-2 text-[13px] font-bold" style={{ color: 'var(--c-text)' }}>
-                    <User className="w-4 h-4" style={{ color: 'var(--c-primary)' }} />
-                    {profile.fullName}
+                  <div className="flex items-center gap-2.5">
+                    {photoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={photoUrl}
+                        alt=""
+                        className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+                        style={{ border: '1px solid var(--c-border)' }}
+                      />
+                    ) : (
+                      <div
+                        className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                        style={{ background: 'var(--c-card)', color: 'var(--c-primary)' }}
+                      >
+                        <User className="w-4 h-4" />
+                      </div>
+                    )}
+                    <div className="text-[13px] font-bold" style={{ color: 'var(--c-text)' }}>
+                      {profile.fullName}
+                    </div>
                   </div>
                   {profile.specialty && (
                     <div className="text-[11.5px]" style={{ color: 'var(--c-muted)' }}>
@@ -214,14 +255,6 @@ export const BindUniversityForm: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  {profile.status && (
-                    <div
-                      className="text-[11.5px] font-bold px-2 py-1.5 rounded-[10px] mt-1"
-                      style={{ background: 'color-mix(in srgb, var(--c-danger) 12%, transparent)', color: 'var(--c-danger)' }}
-                    >
-                      {profile.status}
-                    </div>
-                  )}
                 </div>
               )}
 
