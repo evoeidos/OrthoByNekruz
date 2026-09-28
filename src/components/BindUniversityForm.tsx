@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Link2, Unlink, Calendar, GraduationCap, ChevronDown, ChevronUp, User } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import type { UniversityGradeRow, UniversityProfile, UniversityScheduleDay } from '@/lib/universityParser';
 
 type BindPhase = 'idle' | 'loading' | 'success' | 'error';
+
+// Индекс совпадает с Date.getDay() (0 — воскресенье).
+const WEEKDAYS_RU = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
 
 function getTelegramAuth() {
   const telegram_id = localStorage.getItem('user_tg_id') || '';
@@ -29,6 +32,19 @@ export const BindUniversityForm: React.FC = () => {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [showGrades, setShowGrades] = useState(false);
+  const [showFullWeek, setShowFullWeek] = useState(false);
+
+  const { todayName, tomorrowName } = useMemo(() => {
+    const now = new Date().getDay();
+    return { todayName: WEEKDAYS_RU[now], tomorrowName: WEEKDAYS_RU[(now + 1) % 7] };
+  }, []);
+
+  const visibleDays = useMemo(() => {
+    if (showFullWeek) return schedule;
+    const today = schedule.find(d => d.weekday === todayName);
+    const tomorrow = schedule.find(d => d.weekday === tomorrowName);
+    return [today, tomorrow].filter((d): d is UniversityScheduleDay => Boolean(d));
+  }, [schedule, showFullWeek, todayName, tomorrowName]);
 
   useEffect(() => {
     return () => { if (photoUrl) URL.revokeObjectURL(photoUrl); };
@@ -266,34 +282,67 @@ export const BindUniversityForm: React.FC = () => {
                   <p className="text-[12px]" style={{ color: 'var(--c-muted)' }}>
                     Нет данных расписания (возможно, сайт изменил вёрстку).
                   </p>
+                ) : visibleDays.length === 0 ? (
+                  <p className="text-[12px]" style={{ color: 'var(--c-muted)' }}>
+                    На сегодня и завтра занятий нет.
+                  </p>
                 ) : (
-                  schedule.map((day, di) => (
-                    <div key={di} className="rounded-[12px] overflow-hidden" style={{ border: '1px solid var(--c-border)' }}>
-                      <div className="px-3 py-2 text-[12px] font-bold" style={{ background: 'var(--c-bg-subtle)', color: 'var(--c-text)' }}>
-                        {day.date}
-                      </div>
-                      <div className="divide-y" style={{ borderColor: 'var(--c-border)' }}>
-                        {day.lessons.map((les, li) => (
-                          <div key={li} className="px-3 py-2 text-[12px]">
-                            <div className="font-semibold" style={{ color: 'var(--c-text)' }}>
-                              {les.time && <span className="font-mono mr-2">{les.time}</span>}
-                              {les.subject}
+                  visibleDays.map((day, di) => {
+                    const label = day.weekday === todayName
+                      ? 'Сегодня'
+                      : day.weekday === tomorrowName
+                        ? 'Завтра'
+                        : null;
+                    return (
+                      <div key={di} className="rounded-[12px] overflow-hidden" style={{ border: '1px solid var(--c-border)' }}>
+                        <div
+                          className="px-3 py-2 text-[12px] font-bold flex items-center gap-1.5"
+                          style={{ background: 'var(--c-bg-subtle)', color: 'var(--c-text)' }}
+                        >
+                          {label && (
+                            <span
+                              className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full"
+                              style={{ background: 'var(--c-primary-soft)', color: 'var(--c-primary)' }}
+                            >
+                              {label}
+                            </span>
+                          )}
+                          {day.date}
+                        </div>
+                        <div className="divide-y" style={{ borderColor: 'var(--c-border)' }}>
+                          {day.lessons.map((les, li) => (
+                            <div key={li} className="px-3 py-2 text-[12px]">
+                              <div className="font-semibold" style={{ color: 'var(--c-text)' }}>
+                                {les.time && <span className="font-mono mr-2">{les.time}</span>}
+                                {les.subject}
+                              </div>
+                              {(les.type || les.room || les.teacher) && (
+                                <div className="mt-0.5" style={{ color: 'var(--c-muted)' }}>
+                                  {[les.type, les.room, les.teacher].filter(Boolean).join(' · ')}
+                                </div>
+                              )}
+                              {les.dates && (
+                                <div className="mt-0.5 text-[10.5px]" style={{ color: 'var(--c-text-faint)' }}>
+                                  {les.dates}
+                                </div>
+                              )}
                             </div>
-                            {(les.type || les.room || les.teacher) && (
-                              <div className="mt-0.5" style={{ color: 'var(--c-muted)' }}>
-                                {[les.type, les.room, les.teacher].filter(Boolean).join(' · ')}
-                              </div>
-                            )}
-                            {les.dates && (
-                              <div className="mt-0.5 text-[10.5px]" style={{ color: 'var(--c-text-faint)' }}>
-                                {les.dates}
-                              </div>
-                            )}
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
+                )}
+                {schedule.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowFullWeek(v => !v)}
+                    className="w-full flex items-center justify-center gap-1.5 text-[11.5px] font-semibold py-1.5"
+                    style={{ color: 'var(--c-primary)' }}
+                  >
+                    {showFullWeek ? 'Свернуть' : 'Показать всю неделю'}
+                    {showFullWeek ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </button>
                 )}
               </div>
 
