@@ -6,8 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "postinstall": "playwright install chromium || true; playwright install-deps chromium || true"
+    "lint": "next lint"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",
@@ -32,6 +31,7 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-toast": "^1.2.15",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@sparticuz/chromium": "^131.0.1",
     "@upstash/redis": "^1.37.0",
     "@vercel/kv": "^3.0.0",
     "cheerio": "^1.2.0",
@@ -44,7 +44,7 @@
     "ioredis": "^6.0.0",
     "lucide-react": "^0.294.0",
     "next": "14.0.0",
-    "playwright": "1.48.2",
+    "puppeteer-core": "^23.9.0",
     "react": "^18",
     "react-day-picker": "^8.10.1",
     "react-dom": "^18",
