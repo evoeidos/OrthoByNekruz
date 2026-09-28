@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ScrollArea }     from '@/components/ui/scroll-area';
 import {
@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ExamScreen, loadExamHistory, ExamHistoryEntry } from './ExamScreen';
 import { ResourcesSheet } from './ResourcesSheet';
 import { BindUniversityForm } from './BindUniversityForm';
+import type { UniversityProfile } from '@/lib/universityParser';
 import {
   buildExamTicketsForSubject,
   getExamTicketCompositionLabel,
@@ -327,6 +328,13 @@ export const StatsTab: React.FC<StatsTabProps> = ({
   const [showExam,           setShowExam]           = useState(false);
   const [examHistory,        setExamHistory]        = useState<ExamHistoryEntry[]>([]);
   const [examDate,           setExamDate]           = useState<string | null>(null);
+  const [krasgmuProfile,     setKrasgmuProfile]     = useState<UniversityProfile | null>(null);
+  const [krasgmuPhotoUrl,    setKrasgmuPhotoUrl]    = useState<string | null>(null);
+
+  const handleKrasgmuProfile = useCallback((profile: UniversityProfile | null, photoUrl: string | null) => {
+    setKrasgmuProfile(profile);
+    setKrasgmuPhotoUrl(photoUrl);
+  }, []);
 
   const dateInputRef = useRef<HTMLInputElement>(null);
 
@@ -495,6 +503,39 @@ export const StatsTab: React.FC<StatsTabProps> = ({
               className="rounded-[20px] p-4"
               style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}
             >
+              {krasgmuProfile && (
+                <div
+                  className="flex items-center gap-2.5 pb-3 mb-3.5"
+                  style={{ borderBottom: '1px solid var(--c-border)' }}
+                >
+                  {krasgmuPhotoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={krasgmuPhotoUrl}
+                      alt=""
+                      className="w-11 h-11 rounded-full object-cover flex-shrink-0"
+                      style={{ border: '1px solid var(--c-border)' }}
+                    />
+                  ) : (
+                    <div
+                      className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 font-bold"
+                      style={{ background: 'var(--c-primary-soft)', color: 'var(--c-primary)' }}
+                    >
+                      {krasgmuProfile.fullName.charAt(0)}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <div className="text-[13.5px] font-bold truncate" style={{ color: 'var(--c-text)' }}>
+                      {krasgmuProfile.fullName}
+                    </div>
+                    {krasgmuProfile.course && krasgmuProfile.group && (
+                      <div className="text-[11.5px]" style={{ color: 'var(--c-muted)' }}>
+                        {krasgmuProfile.course} курс · гр. {krasgmuProfile.group}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="flex items-center gap-4">
                 {/* Обертка для кольца с обработчиком двойного тапа */}
         <div 
@@ -605,7 +646,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
             </div>
 
             {/* ─── ПРИВЯЗКА КРАСГМУ ─── */}
-            <BindUniversityForm />
+            <BindUniversityForm onProfileChange={handleKrasgmuProfile} />
 
             {/* ─── ПРОВЕРКА ГОТОВНОСТИ + ГРАФИК ─── */}
             {!examHidden && (

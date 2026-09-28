@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Link2, Unlink, Calendar, GraduationCap, ChevronDown, ChevronUp, User } from 'lucide-react';
+import { Loader2, Link2, Unlink, Calendar, GraduationCap, ChevronDown, ChevronUp } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import type { UniversityGradeRow, UniversityProfile, UniversityScheduleDay } from '@/lib/universityParser';
@@ -18,7 +18,12 @@ function getTelegramAuth() {
   return { telegram_id, initData };
 }
 
-export const BindUniversityForm: React.FC = () => {
+type BindUniversityFormProps = {
+  /** Сообщает наверх текущие ФИО/фото — чтобы показать их, например, в шапке профиля. */
+  onProfileChange?: (profile: UniversityProfile | null, photoUrl: string | null) => void;
+};
+
+export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfileChange }) => {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [phase, setPhase] = useState<BindPhase>('idle');
@@ -49,6 +54,10 @@ export const BindUniversityForm: React.FC = () => {
   useEffect(() => {
     return () => { if (photoUrl) URL.revokeObjectURL(photoUrl); };
   }, [photoUrl]);
+
+  useEffect(() => {
+    onProfileChange?.(profile, photoUrl);
+  }, [profile, photoUrl, onProfileChange]);
 
   const loadPhoto = useCallback(async () => {
     try {
@@ -217,43 +226,15 @@ export const BindUniversityForm: React.FC = () => {
                 </div>
               )}
 
-              {profile && (
+              {profile && (profile.specialty || profile.gradebook || profile.category) && (
+                // ФИО/фото/курс-группа уже показаны в шапке профиля (StatsTab) — здесь только детали.
                 <div className="rounded-[12px] p-3 space-y-1.5" style={{ background: 'var(--c-bg-subtle)' }}>
-                  <div className="flex items-center gap-2.5">
-                    {photoUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={photoUrl}
-                        alt=""
-                        className="w-9 h-9 rounded-full object-cover flex-shrink-0"
-                        style={{ border: '1px solid var(--c-border)' }}
-                      />
-                    ) : (
-                      <div
-                        className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
-                        style={{ background: 'var(--c-card)', color: 'var(--c-primary)' }}
-                      >
-                        <User className="w-4 h-4" />
-                      </div>
-                    )}
-                    <div className="text-[13px] font-bold" style={{ color: 'var(--c-text)' }}>
-                      {profile.fullName}
-                    </div>
-                  </div>
                   {profile.specialty && (
                     <div className="text-[11.5px]" style={{ color: 'var(--c-muted)' }}>
                       {profile.specialty}
                     </div>
                   )}
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {profile.course && profile.group && (
-                      <span
-                        className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
-                        style={{ background: 'var(--c-card)', color: 'var(--c-text)' }}
-                      >
-                        {profile.course} курс · гр. {profile.group}
-                      </span>
-                    )}
+                  <div className="flex flex-wrap gap-1.5">
                     {profile.gradebook && (
                       <span
                         className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
