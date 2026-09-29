@@ -24,6 +24,17 @@ import {
   type ExamTicket,
 } from '@/lib/examTickets';
 import { restartCoachTour } from '@/lib/coachTour';
+import { UniScheduleTab } from './UniScheduleTab';
+import { UniGradesTab } from './UniGradesTab';
+import { EMPTY_UNI, type UniData } from '@/lib/uniHelpers';
+
+type TabId = 'progress' | 'schedule' | 'grades' | 'more';
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'progress', label: 'Прогресс' },
+  { id: 'schedule', label: 'Расписание' },
+  { id: 'grades',   label: 'Оценки' },
+  { id: 'more',     label: 'Ещё' },
+];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Theme = 'dark' | 'light' | 'bright';
@@ -336,6 +347,10 @@ export const StatsTab: React.FC<StatsTabProps> = ({
     setKrasgmuPhotoUrl(photoUrl);
   }, []);
 
+  const [tab, setTab] = useState<TabId>('progress');
+  const [uni, setUni] = useState<UniData>(EMPTY_UNI);
+  const handleUniData = useCallback((d: UniData) => setUni(d), []);
+
   const dateInputRef = useRef<HTMLInputElement>(null);
 
   const reloadExamHistory = () => setExamHistory(loadExamHistory(subject));
@@ -498,44 +513,60 @@ export const StatsTab: React.FC<StatsTabProps> = ({
         <ScrollArea className="flex-1 px-4 scroll-container">
           <div className="space-y-3.5 mx-auto max-w-2xl pt-4" style={{ paddingBottom: 'var(--scroll-pb)' }}>
 
+            {/* ─── ПРОФИЛЬ + ВКЛАДКИ ─── */}
+            <div className="flex items-center gap-3.5 px-1">
+              {krasgmuPhotoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={krasgmuPhotoUrl} alt="" className="w-[68px] h-[68px] rounded-full object-cover flex-shrink-0"
+                  style={{ border: '2px solid var(--c-primary-br)' }} />
+              ) : (
+                <div className="w-[68px] h-[68px] rounded-full flex items-center justify-center flex-shrink-0 text-[26px] font-bold"
+                  style={{ background: 'var(--c-primary-soft)', color: 'var(--c-primary-strong)', border: '2px solid var(--c-primary-br)' }}>
+                  {krasgmuProfile?.fullName?.charAt(0) || subjectLabel.charAt(0)}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="text-[16px] font-bold truncate" style={{ color: 'var(--c-text)' }}>
+                  {krasgmuProfile?.fullName || subjectLabel}
+                </div>
+                <div className="text-[11.5px] mt-0.5 truncate" style={{ color: 'var(--c-muted)' }}>
+                  {krasgmuProfile
+                    ? [krasgmuProfile.course && `${krasgmuProfile.course} курс`, krasgmuProfile.group && `гр. ${krasgmuProfile.group}`, subjectLabel].filter(Boolean).join(' · ')
+                    : 'Профиль'}
+                </div>
+              </div>
+              {uni.bound && (
+                <span className="text-[10.5px] font-bold px-2.5 py-1 rounded-full flex-shrink-0"
+                  style={{ background: 'var(--c-primary-soft)', color: 'var(--c-primary-strong)' }}>КрасГМУ</span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-4 gap-[3px] p-1 rounded-[14px]"
+              style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}>
+              {TABS.map(t => {
+                const active = tab === t.id;
+                return (
+                  <button key={t.id} type="button" onClick={() => setTab(t.id)}
+                    className="h-[34px] rounded-[10px] text-[12px] font-bold transition-all duration-150 active:scale-95"
+                    style={active
+                      ? { background: 'var(--c-primary)', color: 'var(--c-bg)' }
+                      : { background: 'transparent', color: 'var(--c-text)' }}>
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {tab === 'schedule' && <UniScheduleTab uni={uni} onBind={() => setTab('more')} />}
+            {tab === 'grades'   && <UniGradesTab   uni={uni} onBind={() => setTab('more')} />}
+
+
+            {tab === 'progress' && (<>
             {/* ─── HERO: кольцо готовности + дата экзамена ─── */}
             <div
               className="rounded-[20px] p-4"
               style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}
             >
-              {krasgmuProfile && (
-                <div
-                  className="flex items-center gap-2.5 pb-3 mb-3.5"
-                  style={{ borderBottom: '1px solid var(--c-border)' }}
-                >
-                  {krasgmuPhotoUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={krasgmuPhotoUrl}
-                      alt=""
-                      className="w-11 h-11 rounded-full object-cover flex-shrink-0"
-                      style={{ border: '1px solid var(--c-border)' }}
-                    />
-                  ) : (
-                    <div
-                      className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 font-bold"
-                      style={{ background: 'var(--c-primary-soft)', color: 'var(--c-primary)' }}
-                    >
-                      {krasgmuProfile.fullName.charAt(0)}
-                    </div>
-                  )}
-                  <div className="min-w-0">
-                    <div className="text-[13.5px] font-bold truncate" style={{ color: 'var(--c-text)' }}>
-                      {krasgmuProfile.fullName}
-                    </div>
-                    {krasgmuProfile.course && krasgmuProfile.group && (
-                      <div className="text-[11.5px]" style={{ color: 'var(--c-muted)' }}>
-                        {krasgmuProfile.course} курс · гр. {krasgmuProfile.group}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
               <div className="flex items-center gap-4">
                 {/* Обертка для кольца с обработчиком двойного тапа */}
         <div 
@@ -645,11 +676,16 @@ export const StatsTab: React.FC<StatsTabProps> = ({
               ))}
             </div>
 
+            </>)}
+
             {/* ─── ПРИВЯЗКА КРАСГМУ ─── */}
-            <BindUniversityForm onProfileChange={handleKrasgmuProfile} />
+            {/* Всегда смонтирован — загружает расписание и оценки для остальных вкладок */}
+            <div hidden={tab !== 'more'}>
+              <BindUniversityForm onProfileChange={handleKrasgmuProfile} onDataChange={handleUniData} compact />
+            </div>
 
             {/* ─── ПРОВЕРКА ГОТОВНОСТИ + ГРАФИК ─── */}
-            {!examHidden && (
+            {tab === 'progress' && !examHidden && (
               <>
                 <button
                   onClick={() => enoughData && setShowExam(true)}
@@ -744,6 +780,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
               </>
             )}
 
+            {tab === 'more' && (<>
             {/* ─── ПЕРЕКЛЮЧАТЕЛЬ ТЕМ (slim) ─── */}
             <div className="flex items-center gap-2.5">
               <span className="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style={{ color: 'var(--c-muted)' }}>
@@ -925,6 +962,8 @@ export const StatsTab: React.FC<StatsTabProps> = ({
                 <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: '#fbbf24' }} />
               </button>
             )}
+
+          </>)}
 
           </div>
         </ScrollArea>

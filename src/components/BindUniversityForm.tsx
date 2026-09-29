@@ -5,6 +5,7 @@ import { Loader2, Link2, Unlink, Calendar, GraduationCap, ChevronDown, ChevronUp
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import type { UniversityGradeRow, UniversityProfile, UniversityScheduleDay } from '@/lib/universityParser';
+import type { UniData } from '@/lib/uniHelpers';
 
 type BindPhase = 'idle' | 'loading' | 'success' | 'error';
 
@@ -21,9 +22,13 @@ function getTelegramAuth() {
 type BindUniversityFormProps = {
   /** Сообщает наверх текущие ФИО/фото — чтобы показать их, например, в шапке профиля. */
   onProfileChange?: (profile: UniversityProfile | null, photoUrl: string | null) => void;
+  /** Сообщает наверх статус привязки и загруженные расписание/оценки (для вкладок StatsTab). */
+  onDataChange?: (data: UniData) => void;
+  /** Скрыть списки расписания и оценок (они показаны на своих вкладках). */
+  compact?: boolean;
 };
 
-export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfileChange }) => {
+export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfileChange, onDataChange, compact = false }) => {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [phase, setPhase] = useState<BindPhase>('idle');
@@ -54,6 +59,10 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
   useEffect(() => {
     return () => { if (photoUrl) URL.revokeObjectURL(photoUrl); };
   }, [photoUrl]);
+
+  useEffect(() => {
+    onDataChange?.({ checking, bound, loading: dataLoading, schedule, grades, profile });
+  }, [checking, bound, dataLoading, schedule, grades, profile, onDataChange]);
 
   useEffect(() => {
     onProfileChange?.(profile, photoUrl);
@@ -255,6 +264,8 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
                 </div>
               )}
 
+              {!compact && (
+              <>
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--c-muted)' }}>
                   <Calendar className="w-3.5 h-3.5" /> Расписание
@@ -368,6 +379,8 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
                     </div>
                   ))}
                 </div>
+              )}
+              </>
               )}
 
               <div className="flex gap-2 pt-1">
