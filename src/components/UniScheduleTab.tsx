@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { UniData } from '@/lib/uniHelpers';
 import {
-  krasnoyarskNow, currentWeekDays, parseTimeRange, MONTHS_GEN,
+  krasnoyarskNow, currentWeekDays, parseTimeRange, datesIncludeToday, MONTHS_GEN,
 } from '@/lib/uniHelpers';
 import { UniLockedCard } from './UniLockedCard';
 
@@ -39,9 +39,14 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
   const day = uni.schedule.find(d => d.weekday === selected);
   const lessons = day?.lessons ?? [];
 
-  const withState = lessons.map(l => ({ l, range: parseTimeRange(l.time) }));
+  const today = { day: now.date.getUTCDate(), month: now.date.getUTCMonth() };
+  const withState = lessons.map(l => ({
+    l,
+    range: parseTimeRange(l.time),
+    dateMatch: datesIncludeToday(l.dates, today),
+  }));
   const nextIdx = isToday
-    ? withState.findIndex(x => x.range && x.range[0] > now.minutes)
+    ? withState.findIndex(x => x.dateMatch && x.range && x.range[0] > now.minutes)
     : -1;
 
   const selDate = week.find(w => w.weekday === selected);
@@ -87,9 +92,9 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
         <p className="text-[12.5px] text-center py-6" style={{ color: 'var(--c-muted)' }}>Занятий нет.</p>
       )}
 
-      {withState.map(({ l, range }, i) => {
-        const live = isToday && !!range && now.minutes >= range[0] && now.minutes < range[1];
-        const past = isToday && !!range && now.minutes >= range[1];
+      {withState.map(({ l, range, dateMatch }, i) => {
+        const live = isToday && dateMatch && !!range && now.minutes >= range[0] && now.minutes < range[1];
+        const past = isToday && dateMatch && !!range && now.minutes >= range[1];
         const next = !live && i === nextIdx;
         const badge = live && range
           ? `Идёт сейчас · ещё ${range[1] - now.minutes} мин`
