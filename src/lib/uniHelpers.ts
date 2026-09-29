@@ -56,6 +56,22 @@ export function fmtMinutes(min: number): string {
   return `${h}:${String(m).padStart(2, '0')}`;
 }
 
+/**
+ * Несколько пар в одном слоте (чётная/нечётная неделя) отличаются датами
+ * конкретных занятий — «17 ноября», «8 сентября, 22 сентября, ...».
+ * true, если список дат содержит сегодняшнее число+месяц, либо дат нет вовсе
+ * (тогда сузить выбор нечем — считаем совпадением).
+ */
+export function datesIncludeToday(dates: string | undefined, today: { day: number; month: number }): boolean {
+  if (!dates) return true;
+  const re = /(\d{1,2})\s+([а-яё]+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(dates))) {
+    if (+m[1] === today.day && MONTHS_GEN.indexOf(m[2].toLowerCase()) === today.month) return true;
+  }
+  return false;
+}
+
 export function numericGrade(g: string): number | null {
   const n = parseFloat(g.replace(',', '.'));
   return Number.isFinite(n) && n >= 2 && n <= 5 ? n : null;
