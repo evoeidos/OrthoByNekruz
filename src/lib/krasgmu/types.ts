@@ -50,6 +50,22 @@ export type KrasgmuProfile = {
   status: string;
 };
 
+export type KrasgmuUmkdEntry = {
+  umkdId: string;
+  discipline: string;
+};
+
+export type KrasgmuTopicPlanRow = {
+  tlId: string;
+  /** Порядковый номер темы в семестре — «по счёту» лекция/занятие. */
+  seq: number;
+  /** Название раздела/цикла с часами в скобках, напр. «Методы местного обезболивания [2.00]». */
+  section: string;
+  /** Полный текст темы занятия. */
+  topic: string;
+  hours: string;
+};
+
 export type KrasgmuBindStatus =
   | { bound: false }
   | {

@@ -4,7 +4,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Link2, Unlink, Calendar, GraduationCap, ChevronDown, ChevronUp } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import type { UniversityGradeRow, UniversityProfile, UniversityScheduleDay } from '@/lib/universityParser';
+import type {
+  UniversityGradeRow,
+  UniversityMatchedTopic,
+  UniversityProfile,
+  UniversityScheduleDay,
+} from '@/lib/universityParser';
 import type { UniData } from '@/lib/uniHelpers';
 
 type BindPhase = 'idle' | 'loading' | 'success' | 'error';
@@ -39,6 +44,7 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
   const [schedule, setSchedule] = useState<UniversityScheduleDay[]>([]);
   const [grades, setGrades] = useState<UniversityGradeRow[]>([]);
   const [profile, setProfile] = useState<UniversityProfile | null>(null);
+  const [topics, setTopics] = useState<Record<string, Record<string, UniversityMatchedTopic>>>({});
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [showGrades, setShowGrades] = useState(false);
@@ -61,8 +67,8 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
   }, [photoUrl]);
 
   useEffect(() => {
-    onDataChange?.({ checking, bound, loading: dataLoading, schedule, grades, profile });
-  }, [checking, bound, dataLoading, schedule, grades, profile, onDataChange]);
+    onDataChange?.({ checking, bound, loading: dataLoading, schedule, grades, profile, topics });
+  }, [checking, bound, dataLoading, schedule, grades, profile, topics, onDataChange]);
 
   useEffect(() => {
     onProfileChange?.(profile, photoUrl);
@@ -110,6 +116,22 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
     }
   }, []);
 
+  const loadTopics = useCallback(async () => {
+    try {
+      const { telegram_id, initData } = getTelegramAuth();
+      const r = await fetch('/api/auth/university/data', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telegram_id, initData, action: 'topics' }),
+      });
+      const d = await r.json();
+      if (r.ok) setTopics(d.topics ?? {});
+    } catch {
+      // темы лекций — необязательное обогащение расписания, молча пропускаем
+    }
+  }, []);
+
   const loadPersonalData = useCallback(async () => {
     setDataLoading(true);
     setErrorMsg('');
@@ -128,12 +150,13 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
       setProfile(d.profile ?? null);
       if (d.login) setBoundLogin(d.login);
       void loadPhoto();
+      void loadTopics();
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'Не удалось загрузить данные');
     } finally {
       setDataLoading(false);
     }
-  }, [loadPhoto]);
+  }, [loadPhoto, loadTopics]);
 
   useEffect(() => { void loadStatus(); }, [loadStatus]);
 
@@ -184,6 +207,7 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
     setSchedule([]);
     setGrades([]);
     setProfile(null);
+    setTopics({});
     setPhotoUrl(null);
     setPhase('idle');
   };

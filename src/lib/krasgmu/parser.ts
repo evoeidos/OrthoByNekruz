@@ -4,6 +4,8 @@ import type {
   KrasgmuProfile,
   KrasgmuScheduleDay,
   KrasgmuScheduleLesson,
+  KrasgmuTopicPlanRow,
+  KrasgmuUmkdEntry,
 } from '@/lib/krasgmu/types';
 
 function cleanText(s: string): string {
@@ -173,6 +175,60 @@ export function parseGradesHtml(html: string): KrasgmuGradeRow[] {
       teacher,
       kind,
     });
+  });
+
+  return rows;
+}
+
+/**
+ * Парсинг списка УМКД студента (page[common]=user&id=<id>&cat=student&what=umkd) —
+ * плоская таблица 'table.silver' со ссылками на дисциплины. Название дисциплины
+ * совпадает по формату с полем subject в расписании — служит ключом для связки.
+ * У одной дисциплины может быть несколько umkd_id (разные семестры/когорты).
+ */
+export function parseUmkdListHtml(html: string): KrasgmuUmkdEntry[] {
+  const $ = cheerio.load(html);
+  const rows: KrasgmuUmkdEntry[] = [];
+
+  $('table.silver a[href*="umkd_id="]').each((_, a) => {
+    const $a = $(a);
+    const match = ($a.attr('href') || '').match(/umkd_id=(\d+)/);
+    const discipline = cleanText($a.text());
+    if (!match || !discipline) return;
+    rows.push({ umkdId: match[1], discipline });
+  });
+
+  return rows;
+}
+
+/**
+ * Парсинг тематического плана дисциплины (page[org]=dean&cat=oop&mode=umkd&umkd_id=..
+ * &tl_type=<0 лекции|1 практика|10 семинары|5 лаб.работы|...>) — одна таблица со
+ * ВСЕМИ темами семестра сразу. № темы — порядковый номер лекции/занятия «по счёту»,
+ * с которым сверяем даты из расписания; каждая строка помечена id="tl<tl_id>".
+ */
+export function parseTopicPlanHtml(html: string): KrasgmuTopicPlanRow[] {
+  const $ = cheerio.load(html);
+  const rows: KrasgmuTopicPlanRow[] = [];
+
+  $('table.silver tr[id^="tl"]').each((_, tr) => {
+    const $tr = $(tr);
+    const tlId = ($tr.attr('id') || '').replace(/^tl/, '');
+    const cells = $tr.find('td');
+    if (!tlId || cells.length < 5) return;
+
+    const seq = parseInt(cleanText($(cells.get(1)).text()), 10);
+    if (!Number.isFinite(seq)) return;
+
+    const sectionCell = $(cells.get(2));
+    const section = cleanText(sectionCell.find('span').first().text()) || cleanText(sectionCell.text());
+
+    const topicCell = $(cells.get(3));
+    const topic = cleanText(topicCell.find('b').first().text()) || cleanText(topicCell.text());
+
+    const hours = cleanText($(cells.get(4)).text());
+
+    rows.push({ tlId, seq, section, topic, hours });
   });
 
   return rows;

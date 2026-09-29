@@ -1,4 +1,9 @@
-import type { UniversityGradeRow, UniversityProfile, UniversityScheduleDay } from '@/lib/universityParser';
+import type {
+  UniversityGradeRow,
+  UniversityMatchedTopic,
+  UniversityProfile,
+  UniversityScheduleDay,
+} from '@/lib/universityParser';
 
 export type UniData = {
   checking: boolean;
@@ -7,10 +12,12 @@ export type UniData = {
   schedule: UniversityScheduleDay[];
   grades: UniversityGradeRow[];
   profile: UniversityProfile | null;
+  /** Темы лекций/практик из УМКД, сшитые по датам: дисциплина → дата → тема. Догружается отдельно и позже остального. */
+  topics: Record<string, Record<string, UniversityMatchedTopic>>;
 };
 
 export const EMPTY_UNI: UniData = {
-  checking: true, bound: false, loading: false, schedule: [], grades: [], profile: null,
+  checking: true, bound: false, loading: false, schedule: [], grades: [], profile: null, topics: {},
 };
 
 // Индекс совпадает с getDay() (0 — воскресенье)
@@ -34,13 +41,13 @@ export function krasnoyarskNow() {
   };
 }
 
-/** Дата Пн–Сб текущей недели (по Красноярску). */
+/** Дата Пн–Сб текущей недели (по Красноярску). month — 0-based, свой для каждого дня (неделя может пересекать границу месяца). */
 export function currentWeekDays() {
   const { date, weekdayIdx } = krasnoyarskNow();
   const dow = (weekdayIdx + 6) % 7; // 0 = Пн
   return [1, 2, 3, 4, 5, 6].map((wd, i) => {
     const d = new Date(date.getTime() + (i - dow) * 86400000);
-    return { weekday: WEEKDAYS_RU[wd], short: WEEKDAYS_SHORT[wd], num: d.getUTCDate() };
+    return { weekday: WEEKDAYS_RU[wd], short: WEEKDAYS_SHORT[wd], num: d.getUTCDate(), month: d.getUTCMonth() };
   });
 }
 
@@ -57,19 +64,29 @@ export function fmtMinutes(min: number): string {
 }
 
 /**
+ * Из списка дат («17 ноября», «8 сентября, 22 сентября, ...») находит и
+ * возвращает исходную строку, чьи день+месяц совпадают с заданными —
+ * ей же проиндексирована карта тем УМКД (dateMatch в UniData.topics).
+ */
+export function findMatchingDateEntry(
+  dates: string | undefined,
+  target: { day: number; month: number },
+): string | null {
+  if (!dates) return null;
+  for (const raw of dates.split(',').map(d => d.trim())) {
+    const m = raw.match(/(\d{1,2})\s+([а-яё]+)/i);
+    if (m && +m[1] === target.day && MONTHS_GEN.indexOf(m[2].toLowerCase()) === target.month) return raw;
+  }
+  return null;
+}
+
+/**
  * Несколько пар в одном слоте (чётная/нечётная неделя) отличаются датами
- * конкретных занятий — «17 ноября», «8 сентября, 22 сентября, ...».
- * true, если список дат содержит сегодняшнее число+месяц, либо дат нет вовсе
- * (тогда сузить выбор нечем — считаем совпадением).
+ * конкретных занятий. true, если среди дат есть сегодняшняя, либо дат нет
+ * вовсе (тогда сузить выбор нечем — считаем совпадением).
  */
 export function datesIncludeToday(dates: string | undefined, today: { day: number; month: number }): boolean {
-  if (!dates) return true;
-  const re = /(\d{1,2})\s+([а-яё]+)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(dates))) {
-    if (+m[1] === today.day && MONTHS_GEN.indexOf(m[2].toLowerCase()) === today.month) return true;
-  }
-  return false;
+  return dates === undefined || findMatchingDateEntry(dates, today) !== null;
 }
 
 export function numericGrade(g: string): number | null {

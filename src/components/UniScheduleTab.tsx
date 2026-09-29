@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { UniData } from '@/lib/uniHelpers';
 import {
-  krasnoyarskNow, currentWeekDays, parseTimeRange, datesIncludeToday, MONTHS_GEN,
+  krasnoyarskNow, currentWeekDays, parseTimeRange, datesIncludeToday, findMatchingDateEntry, MONTHS_GEN,
 } from '@/lib/uniHelpers';
 import { UniLockedCard } from './UniLockedCard';
 
@@ -40,18 +40,23 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
   const lessons = day?.lessons ?? [];
 
   const today = { day: now.date.getUTCDate(), month: now.date.getUTCMonth() };
-  const withState = lessons.map(l => ({
-    l,
-    range: parseTimeRange(l.time),
-    dateMatch: datesIncludeToday(l.dates, today),
-  }));
+  const selDate = week.find(w => w.weekday === selected);
+
+  const withState = lessons.map(l => {
+    const dateEntry = selDate ? findMatchingDateEntry(l.dates, { day: selDate.num, month: selDate.month }) : null;
+    return {
+      l,
+      range: parseTimeRange(l.time),
+      dateMatch: datesIncludeToday(l.dates, today),
+      topic: dateEntry ? uni.topics[l.subject]?.[dateEntry] : undefined,
+    };
+  });
   const nextIdx = isToday
     ? withState.findIndex(x => x.dateMatch && x.range && x.range[0] > now.minutes)
     : -1;
 
-  const selDate = week.find(w => w.weekday === selected);
   const dateLabel = selDate
-    ? `${selected}, ${selDate.num} ${MONTHS_GEN[now.date.getUTCMonth()]}`
+    ? `${selected}, ${selDate.num} ${MONTHS_GEN[selDate.month]}`
     : selected;
 
   return (
@@ -92,7 +97,7 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
         <p className="text-[12.5px] text-center py-6" style={{ color: 'var(--c-muted)' }}>Занятий нет.</p>
       )}
 
-      {withState.map(({ l, range, dateMatch }, i) => {
+      {withState.map(({ l, range, dateMatch, topic }, i) => {
         const live = isToday && dateMatch && !!range && now.minutes >= range[0] && now.minutes < range[1];
         const past = isToday && dateMatch && !!range && now.minutes >= range[1];
         const next = !live && i === nextIdx;
@@ -128,6 +133,11 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
                 </span>
               )}
               <div className="text-[14px] font-bold leading-snug" style={{ color: 'var(--c-text)' }}>{l.subject}</div>
+              {topic && (
+                <div className="text-[12.5px] mt-1 leading-snug" style={{ color: 'var(--c-text)' }}>
+                  <span className="font-bold" style={{ color: 'var(--c-primary)' }}>№{topic.seq}</span> {topic.topic}
+                </div>
+              )}
               {meta && <div className="text-[12px] mt-0.5" style={{ color: 'var(--c-muted)' }}>{meta}</div>}
               {l.dates && <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-text-faint)' }}>{l.dates}</div>}
               {live && (

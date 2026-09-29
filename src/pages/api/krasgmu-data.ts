@@ -2,7 +2,12 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
 import { resolveRequestIdentity } from '@/lib/resolveIdentity';
 import { KrasgmuAuthError } from '@/lib/krasgmu/client';
-import { fetchKrasgmuGrades, fetchKrasgmuProfile, fetchKrasgmuSchedule } from '@/lib/krasgmu/service';
+import {
+  fetchKrasgmuGrades,
+  fetchKrasgmuLectureTopics,
+  fetchKrasgmuProfile,
+  fetchKrasgmuSchedule,
+} from '@/lib/krasgmu/service';
 import { deleteBinding, getBindStatus } from '@/lib/krasgmu/store';
 
 const redis = createRedisFromEnv();
@@ -44,6 +49,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     if (act === 'profile') {
       const data = await fetchKrasgmuProfile(redis, identity.tgId);
+      return res.status(200).json({ success: true, ...data });
+    }
+    if (act === 'topics') {
+      const data = await fetchKrasgmuLectureTopics(redis, identity.tgId);
       return res.status(200).json({ success: true, ...data });
     }
     if (act === 'all') {

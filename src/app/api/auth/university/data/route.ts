@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { deleteBinding, getBindStatus } from '@/lib/krasgmu/store';
 import {
   fetchUniversityGrades,
+  fetchUniversityLectureTopics,
   fetchUniversityProfile,
   fetchUniversitySchedule,
 } from '@/lib/universityParser';
@@ -64,6 +65,10 @@ export async function POST(req: Request) {
     }
     if (act === 'profile') {
       const data = await fetchUniversityProfile(redis, identity.tgId);
+      return NextResponse.json({ success: true, ...data });
+    }
+    if (act === 'topics') {
+      const data = await fetchUniversityLectureTopics(redis, identity.tgId);
       return NextResponse.json({ success: true, ...data });
     }
     if (act === 'all') {
