@@ -5,7 +5,13 @@
 import type { AppRedis } from '@/lib/redis';
 import { fetchKrasgmuPage } from '@/lib/krasgmu/client';
 import { parseGradesHtml, parseProfileHtml, parseScheduleHtml } from '@/lib/krasgmu/parser';
-import { fetchKrasgmuGrades, fetchKrasgmuProfile, fetchKrasgmuSchedule } from '@/lib/krasgmu/service';
+import {
+  fetchKrasgmuGrades,
+  fetchKrasgmuLectureTopics,
+  fetchKrasgmuProfile,
+  fetchKrasgmuSchedule,
+} from '@/lib/krasgmu/service';
+import type { MatchedTopic } from '@/lib/krasgmu/topicMatch';
 import type {
   KrasgmuGradeRow,
   KrasgmuProfile,
@@ -17,12 +23,13 @@ export type { KrasgmuGradeRow as UniversityGradeRow };
 export type { KrasgmuScheduleDay as UniversityScheduleDay };
 export type { KrasgmuSessionCookies as UniversitySessionCookies };
 export type { KrasgmuProfile as UniversityProfile };
+export type { MatchedTopic as UniversityMatchedTopic };
 
 const SCHEDULE_PATH = '/index.php?page%5Borg%5D=dean&cat=schedule';
 const GRADES_PATH = '/index.php?page%5Borg%5D=dean&cat=progress';
 const CACHE_TTL_SEC = 300;
 
-function cacheKey(tgId: string, kind: 'schedule' | 'grades' | 'profile') {
+function cacheKey(tgId: string, kind: 'schedule' | 'grades' | 'profile' | 'topics') {
   return `krasgmu_cache:${kind}:${tgId}`;
 }
 
@@ -88,6 +95,23 @@ export async function fetchUniversityProfile(
 
   const data = await fetchKrasgmuProfile(redis, tgId);
   await redis.set(cacheKey(tgId, 'profile'), data, { ex: CACHE_TTL_SEC });
+  return data;
+}
+
+/** Темы лекций/практик по датам, сшитые с тематическим планом УМКД. Дороже
+ * остальных вызовов (доп. запросы на список УМКД и планы по дисциплинам) —
+ * кэшируется так же, как расписание/оценки/профиль. */
+export async function fetchUniversityLectureTopics(
+  redis: AppRedis,
+  tgId: string,
+): Promise<{ login: string; topics: Record<string, Record<string, MatchedTopic>> }> {
+  const cached = await redis.get<{ login: string; topics: Record<string, Record<string, MatchedTopic>> }>(
+    cacheKey(tgId, 'topics'),
+  );
+  if (cached) return cached;
+
+  const data = await fetchKrasgmuLectureTopics(redis, tgId);
+  await redis.set(cacheKey(tgId, 'topics'), data, { ex: CACHE_TTL_SEC });
   return data;
 }
 
