@@ -40,6 +40,7 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
   const [grades, setGrades] = useState<UniversityGradeRow[]>([]);
   const [profile, setProfile] = useState<UniversityProfile | null>(null);
   const [topics, setTopics] = useState<Record<string, Record<string, UniversityMatchedTopic>>>({});
+  const [practiceTopics, setPracticeTopics] = useState<Record<string, Record<string, UniversityMatchedTopic>>>({});
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [showGrades, setShowGrades] = useState(false);
@@ -62,8 +63,8 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
   }, [photoUrl]);
 
   useEffect(() => {
-    onDataChange?.({ checking, bound, loading: dataLoading, schedule, cycles, grades, profile, topics });
-  }, [checking, bound, dataLoading, schedule, cycles, grades, profile, topics, onDataChange]);
+    onDataChange?.({ checking, bound, loading: dataLoading, schedule, cycles, grades, profile, topics, practiceTopics });
+  }, [checking, bound, dataLoading, schedule, cycles, grades, profile, topics, practiceTopics, onDataChange]);
 
   useEffect(() => {
     onProfileChange?.(profile, photoUrl);
@@ -121,7 +122,10 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
         body: JSON.stringify({ telegram_id, initData, action: 'topics' }),
       });
       const d = await r.json();
-      if (r.ok) setTopics(d.topics ?? {});
+      if (r.ok) {
+        setTopics(d.topics ?? {});
+        setPracticeTopics(d.practiceTopics ?? {});
+      }
     } catch {
       // темы лекций — необязательное обогащение расписания, молча пропускаем
     }
@@ -205,6 +209,7 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
     setGrades([]);
     setProfile(null);
     setTopics({});
+    setPracticeTopics({});
     setPhotoUrl(null);
     setPhase('idle');
   };

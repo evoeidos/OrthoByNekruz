@@ -82,12 +82,18 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
   // «ПРАКТИКА» в недельной сетке — заглушка: реальная дисциплина зависит от того,
   // в диапазон дат какого цикла (циклового расписания) попадает просматриваемый день.
   const activeCycle = selDate ? findActiveCycle(uni.cycles, selDate.date) : null;
+  // Темы практики (uni.practiceTopics) проиндексированы датой С ГОДОМ — в отличие
+  // от тем лекций, где год не нужен (даты в пределах одного семестра не пересекаются).
+  const practiceDateKey = selDate ? `${selDate.num} ${MONTHS_GEN[selDate.month]} ${selDate.date.getUTCFullYear()}` : null;
 
   const withState = lessons.map(l => {
     const isCyclePlaceholder = l.subject === 'ПРАКТИКА';
     const subject = isCyclePlaceholder && activeCycle ? activeCycle.discipline : l.subject;
     const room = isCyclePlaceholder && activeCycle ? activeCycle.address : l.room;
     const dateEntry = selDate ? findMatchingDateEntry(l.dates, { day: selDate.num, month: selDate.month }) : null;
+    const topic = isCyclePlaceholder
+      ? (activeCycle && practiceDateKey ? uni.practiceTopics[activeCycle.discipline]?.[practiceDateKey] : undefined)
+      : (dateEntry ? uni.topics[subject]?.[dateEntry] : undefined);
     return {
       l,
       subject,
@@ -95,7 +101,7 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
       cycle: isCyclePlaceholder ? activeCycle : null,
       range: parseTimeRange(l.time),
       dateMatch: datesIncludeToday(l.dates, today),
-      topic: dateEntry ? uni.topics[subject]?.[dateEntry] : undefined,
+      topic,
     };
   });
   const nextIdx = isToday
