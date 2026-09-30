@@ -23,7 +23,7 @@ function useKrskNow() {
 
 const LESSON_COLORS = ['var(--c-primary)', 'var(--c-info)', 'var(--c-amber)'];
 
-type MethodichkaState = 'loading' | UniversityMethodichka | null;
+type MethodichkaState = 'loading' | UniversityMethodichka | { error: string };
 
 export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ uni, onBind }) => {
   const now = useKrskNow();
@@ -49,9 +49,15 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
           body: JSON.stringify({ telegram_id, initData, action: 'methodichka', tlId }),
         });
         const d = await r.json();
-        setMethodichkas(m => ({ ...m, [tlId]: r.ok ? (d.methodichka ?? null) : null }));
-      } catch {
-        setMethodichkas(m => ({ ...m, [tlId]: null }));
+        if (!r.ok) {
+          setMethodichkas(m => ({ ...m, [tlId]: { error: `${d.error || 'Ошибка сервера'} (HTTP ${r.status}${d.code ? `, ${d.code}` : ''})` } }));
+        } else if (!d.methodichka) {
+          setMethodichkas(m => ({ ...m, [tlId]: { error: 'У этой темы нет методических указаний для обучающихся на сайте (либо не удалось распознать страницу).' } }));
+        } else {
+          setMethodichkas(m => ({ ...m, [tlId]: d.methodichka }));
+        }
+      } catch (e) {
+        setMethodichkas(m => ({ ...m, [tlId]: { error: e instanceof Error ? e.message : 'Сетевая ошибка' } }));
       }
     })();
   };
@@ -290,10 +296,10 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
                 </div>
               );
             }
-            if (!data) {
+            if ('error' in data) {
               return (
-                <p className="text-[13px] text-center py-10" style={{ color: 'var(--c-muted)' }}>
-                  Не удалось загрузить методичку.
+                <p className="text-[13px] text-center py-10 px-4" style={{ color: 'var(--c-muted)' }}>
+                  {data.error}
                 </p>
               );
             }
