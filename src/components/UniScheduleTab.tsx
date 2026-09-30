@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { UniData } from '@/lib/uniHelpers';
 import {
   krasnoyarskNow, currentWeekDays, parseTimeRange, datesIncludeToday, findMatchingDateEntry, findActiveCycle, MONTHS_GEN,
@@ -23,6 +24,8 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
   const now = useKrskNow();
   const week = useMemo(() => currentWeekDays(), [now.weekdayIdx]); // eslint-disable-line react-hooks/exhaustive-deps
   const [picked, setPicked] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  useEffect(() => { setExpanded({}); }, [picked]);
 
   if (!uni.bound) return <UniLockedCard title="Расписание не подключено" loading={uni.checking || uni.loading} onBind={onBind} />;
   if (uni.loading) return <UniLockedCard title="" loading onBind={onBind} />;
@@ -106,63 +109,133 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
         <p className="text-[12.5px] text-center py-6" style={{ color: 'var(--c-muted)' }}>Занятий нет.</p>
       )}
 
-      {withState.map(({ l, subject, room, cycle, range, dateMatch, topic }, i) => {
-        const live = isToday && dateMatch && !!range && now.minutes >= range[0] && now.minutes < range[1];
-        const past = isToday && dateMatch && !!range && now.minutes >= range[1];
-        const next = !live && i === nextIdx;
-        const badge = live && range
-          ? `Идёт сейчас · ещё ${range[1] - now.minutes} мин`
-          : next && range ? `Далее · через ${range[0] - now.minutes} мин` : '';
-        const pct = live && range ? Math.round(((now.minutes - range[0]) / (range[1] - range[0])) * 100) : 0;
-        const meta = [l.type, room, l.teacher].filter(Boolean).join(' · ');
-        return (
-          <div
-            key={i}
-            className="flex gap-3 rounded-[16px] px-3.5 py-3"
-            style={{
-              background: live ? 'var(--c-primary-soft)' : 'var(--c-card)',
-              border: live ? '1.5px solid var(--c-primary)' : '1px solid var(--c-border)',
-              opacity: past ? 0.5 : 1,
-            }}
-          >
-            <div className="w-[52px] flex-shrink-0 font-mono text-[12px] font-bold leading-snug" style={{ color: 'var(--c-muted)' }}>
-              {(l.time || '').split(/\s*[\/–-]\s*/).map((t, ti) => <div key={ti}>{t}</div>)}
-            </div>
-            <div className="w-[3px] rounded-full flex-shrink-0" style={{ background: LESSON_COLORS[i % 3] }} />
-            <div className="flex-1 min-w-0 flex flex-col">
-              {badge && (
-                <span
-                  className="self-start text-[10.5px] font-bold px-2 py-0.5 rounded-full mb-1.5"
-                  style={{
-                    background: live ? 'var(--c-primary)' : 'var(--c-bg-subtle)',
-                    color: live ? 'var(--c-bg)' : 'var(--c-muted)',
-                  }}
-                >
-                  {badge}
-                </span>
-              )}
-              <div className="text-[14px] font-bold leading-snug" style={{ color: 'var(--c-text)' }}>{subject}</div>
-              {topic && (
-                <div className="text-[12.5px] mt-1 leading-snug" style={{ color: 'var(--c-text)' }}>
-                  <span className="font-bold" style={{ color: 'var(--c-primary)' }}>№{topic.seq}</span> {topic.topic}
-                </div>
-              )}
-              {meta && <div className="text-[12px] mt-0.5" style={{ color: 'var(--c-muted)' }}>{meta}</div>}
-              {l.dates && <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-text-faint)' }}>{l.dates}</div>}
-              {cycle && (
-                <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-text-faint)' }}>
-                  Цикл: {cycle.startDate} – {cycle.endDate}
-                </div>
-              )}
-              {live && (
-                <div className="h-[3px] rounded-full mt-2 overflow-hidden" style={{ background: 'var(--c-border)' }}>
-                  <div className="h-full" style={{ width: `${pct}%`, background: 'var(--c-primary)' }} />
-                </div>
-              )}
-            </div>
+      {(() => {
+        const decorated = withState.map((x, i) => {
+          const { range, dateMatch } = x;
+          const live = isToday && dateMatch && !!range && now.minutes >= range[0] && now.minutes < range[1];
+          const past = isToday && dateMatch && !!range && now.minutes >= range[1];
+          const next = !live && i === nextIdx;
+          const badge = live && range
+            ? `Идёт сейчас · ещё ${range[1] - now.minutes} мин`
+            : next && range ? `Далее · через ${range[0] - now.minutes} мин` : '';
+          const pct = live && range ? Math.round(((now.minutes - range[0]) / (range[1] - range[0])) * 100) : 0;
+          const meta = [x.l.type, x.room, x.l.teacher].filter(Boolean).join(' · ');
+          return { ...x, live, past, badge, pct, meta };
+        });
+
+        // Несколько лекций делят один и тот же временной слот (ротация по чётным/нечётным
+        // датам) — визуально это выглядит как куча пар подряд, хотя реально идёт только
+        // одна. Схлопываем такую группу в одну карточку с актуальной парой сверху и
+        // разворачиваемым списком остальных вариантов снизу — но только когда среди
+        // группы ровно одна дата совпадает с просматриваемым днём (типичный случай);
+        // иначе (0 или 2+ совпадений) показываем всё как раньше, чтобы не потерять данные.
+        const groups: (typeof decorated)[number][][] = [];
+        const groupIdxByTime = new Map<string, number>();
+        for (const item of decorated) {
+          let gi = groupIdxByTime.get(item.l.time);
+          if (gi === undefined) {
+            gi = groups.length;
+            groupIdxByTime.set(item.l.time, gi);
+            groups.push([]);
+          }
+          groups[gi].push(item);
+        }
+
+        const renderCardBody = (item: (typeof decorated)[number]) => (
+          <div className="flex-1 min-w-0 flex flex-col">
+            {item.badge && (
+              <span
+                className="self-start text-[10.5px] font-bold px-2 py-0.5 rounded-full mb-1.5"
+                style={{
+                  background: item.live ? 'var(--c-primary)' : 'var(--c-bg-subtle)',
+                  color: item.live ? 'var(--c-bg)' : 'var(--c-muted)',
+                }}
+              >
+                {item.badge}
+              </span>
+            )}
+            <div className="text-[14px] font-bold leading-snug" style={{ color: 'var(--c-text)' }}>{item.subject}</div>
+            {item.topic && (
+              <div className="text-[12.5px] mt-1 leading-snug" style={{ color: 'var(--c-text)' }}>
+                <span className="font-bold" style={{ color: 'var(--c-primary)' }}>№{item.topic.seq}</span> {item.topic.topic}
+              </div>
+            )}
+            {item.meta && <div className="text-[12px] mt-0.5" style={{ color: 'var(--c-muted)' }}>{item.meta}</div>}
+            {item.l.dates && <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-text-faint)' }}>{item.l.dates}</div>}
+            {item.cycle && (
+              <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-text-faint)' }}>
+                Цикл: {item.cycle.startDate} – {item.cycle.endDate}
+              </div>
+            )}
+            {item.live && (
+              <div className="h-[3px] rounded-full mt-2 overflow-hidden" style={{ background: 'var(--c-border)' }}>
+                <div className="h-full" style={{ width: `${item.pct}%`, background: 'var(--c-primary)' }} />
+              </div>
+            )}
           </div>
         );
-      })}
+
+        return groups.map((group, gi) => {
+          const matched = group.filter(x => x.dateMatch);
+          const primary = group.length > 1 && matched.length === 1 ? matched[0] : null;
+          const alternates = primary ? group.filter(x => x !== primary) : [];
+          const isOpen = !!expanded[group[0].l.time];
+
+          if (!primary) {
+            // Обычный случай (одна пара в слоте) либо неоднозначная группа — без сворачивания.
+            return group.map((item, ii) => (
+              <div
+                key={`${gi}-${ii}`}
+                className="flex gap-3 rounded-[16px] px-3.5 py-3"
+                style={{
+                  background: item.live ? 'var(--c-primary-soft)' : 'var(--c-card)',
+                  border: item.live ? '1.5px solid var(--c-primary)' : '1px solid var(--c-border)',
+                  opacity: item.past ? 0.5 : 1,
+                }}
+              >
+                <div className="w-[52px] flex-shrink-0 font-mono text-[12px] font-bold leading-snug" style={{ color: 'var(--c-muted)' }}>
+                  {(item.l.time || '').split(/\s*[\/–-]\s*/).map((t, ti) => <div key={ti}>{t}</div>)}
+                </div>
+                <div className="w-[3px] rounded-full flex-shrink-0" style={{ background: LESSON_COLORS[gi % 3] }} />
+                {renderCardBody(item)}
+              </div>
+            ));
+          }
+
+          return (
+            <div key={gi} className="rounded-[16px] overflow-hidden" style={{ border: primary.live ? '1.5px solid var(--c-primary)' : '1px solid var(--c-border)' }}>
+              <div
+                className="flex gap-3 px-3.5 py-3"
+                style={{ background: primary.live ? 'var(--c-primary-soft)' : 'var(--c-card)', opacity: primary.past ? 0.5 : 1 }}
+              >
+                <div className="w-[52px] flex-shrink-0 font-mono text-[12px] font-bold leading-snug" style={{ color: 'var(--c-muted)' }}>
+                  {(primary.l.time || '').split(/\s*[\/–-]\s*/).map((t, ti) => <div key={ti}>{t}</div>)}
+                </div>
+                <div className="w-[3px] rounded-full flex-shrink-0" style={{ background: LESSON_COLORS[gi % 3] }} />
+                {renderCardBody(primary)}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setExpanded(e => ({ ...e, [group[0].l.time]: !e[group[0].l.time] }))}
+                className="w-full flex items-center justify-between px-3.5 py-2 text-[11px] font-semibold"
+                style={{ borderTop: '1px solid var(--c-border)', color: 'var(--c-muted)' }}
+              >
+                <span>Ещё {alternates.length} {alternates.length === 1 ? 'вариант' : 'варианта'} на этот слот</span>
+                {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </button>
+
+              {isOpen && alternates.map((alt, ai) => (
+                <div key={ai} className="px-3.5 py-2 text-[12px]" style={{ borderTop: '1px solid var(--c-border)', opacity: 0.65 }}>
+                  <div className="font-semibold" style={{ color: 'var(--c-text)' }}>{alt.subject}</div>
+                  {alt.meta && <div className="mt-0.5" style={{ color: 'var(--c-muted)' }}>{alt.meta}</div>}
+                  {alt.l.dates && <div className="mt-0.5 text-[10.5px]" style={{ color: 'var(--c-text-faint)' }}>{alt.l.dates}</div>}
+                </div>
+              ))}
+            </div>
+          );
+        });
+      })()}
     </>
   );
 };
