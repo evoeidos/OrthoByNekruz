@@ -15,12 +15,15 @@ export type UniData = {
   cycles: UniversityCycle[];
   grades: UniversityGradeRow[];
   profile: UniversityProfile | null;
-  /** Темы лекций/практик из УМКД, сшитые по датам: дисциплина → дата → тема. Догружается отдельно и позже остального. */
+  /** Темы лекций из УМКД, сшитые по датам: дисциплина → дата (без года) → тема. Догружается отдельно и позже остального. */
   topics: Record<string, Record<string, UniversityMatchedTopic>>;
+  /** Темы практики (по активному циклу) — дисциплина → дата «D month YYYY» (с годом) → тема. */
+  practiceTopics: Record<string, Record<string, UniversityMatchedTopic>>;
 };
 
 export const EMPTY_UNI: UniData = {
-  checking: true, bound: false, loading: false, schedule: [], cycles: [], grades: [], profile: null, topics: {},
+  checking: true, bound: false, loading: false, schedule: [], cycles: [], grades: [], profile: null,
+  topics: {}, practiceTopics: {},
 };
 
 /** Идентификация текущего пользователя для запросов к /api/auth/university/*. */

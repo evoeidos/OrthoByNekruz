@@ -1,5 +1,5 @@
-import { MONTHS_GEN } from '@/lib/uniHelpers';
-import type { KrasgmuScheduleDay, KrasgmuTopicPlanRow } from '@/lib/krasgmu/types';
+import { MONTHS_GEN, WEEKDAYS_RU, parseRuFullDate } from '@/lib/uniHelpers';
+import type { KrasgmuCycle, KrasgmuScheduleDay, KrasgmuTopicPlanRow } from '@/lib/krasgmu/types';
 
 export type MatchedTopic = {
   tlId: string;
@@ -16,6 +16,16 @@ function ruDateKey(s: string): number | null {
   const month = MONTHS_GEN.indexOf(m[2].toLowerCase());
   if (month < 0) return null;
   return month * 100 + (+m[1]);
+}
+
+function zipTopics(sortedRawDates: string[], topicPlan: KrasgmuTopicPlanRow[]): Map<string, MatchedTopic> {
+  const sortedTopics = [...topicPlan].sort((a, b) => a.seq - b.seq);
+  const map = new Map<string, MatchedTopic>();
+  sortedRawDates.forEach((raw, i) => {
+    const t = sortedTopics[i];
+    if (t) map.set(raw, { tlId: t.tlId, seq: t.seq, topic: t.topic, section: t.section, hours: t.hours });
+  });
+  return map;
 }
 
 /**
@@ -49,17 +59,45 @@ export function matchDatesToTopics(
   dates: string[],
   topicPlan: KrasgmuTopicPlanRow[],
 ): Map<string, MatchedTopic> {
-  const sortedDates = [...new Set(dates)]
+  const sorted = [...new Set(dates)]
     .map(raw => ({ raw, key: ruDateKey(raw) }))
     .filter((d): d is { raw: string; key: number } => d.key !== null)
-    .sort((a, b) => a.key - b.key);
+    .sort((a, b) => a.key - b.key)
+    .map(d => d.raw);
+  return zipTopics(sorted, topicPlan);
+}
 
-  const sortedTopics = [...topicPlan].sort((a, b) => a.seq - b.seq);
+/**
+ * Перечисляет календарные даты внутри диапазона цикла (циклового расписания),
+ * приходящиеся на заданные дни недели («Понедельник» и т.п.) — те дни, когда в
+ * обычном недельном расписании стоит заглушка «ПРАКТИКА». Формат каждой даты —
+ * «D month YYYY» (с годом — в отличие от lesson.dates, цикл может пересекать
+ * границу года).
+ */
+export function enumerateCycleDates(cycle: KrasgmuCycle, weekdays: Set<string>): string[] {
+  const start = parseRuFullDate(cycle.startDate);
+  const end = parseRuFullDate(cycle.endDate);
+  if (!start || !end) return [];
 
-  const map = new Map<string, MatchedTopic>();
-  sortedDates.forEach((d, i) => {
-    const t = sortedTopics[i];
-    if (t) map.set(d.raw, { tlId: t.tlId, seq: t.seq, topic: t.topic, section: t.section, hours: t.hours });
-  });
-  return map;
+  const dates: string[] = [];
+  for (let t = start.getTime(); t <= end.getTime(); t += 86400000) {
+    const d = new Date(t);
+    if (weekdays.has(WEEKDAYS_RU[d.getUTCDay()])) {
+      dates.push(`${d.getUTCDate()} ${MONTHS_GEN[d.getUTCMonth()]} ${d.getUTCFullYear()}`);
+    }
+  }
+  return dates;
+}
+
+/** Как matchDatesToTopics, но для дат с годом (enumerateCycleDates) — сортировка по реальной хронологии. */
+export function matchFullDatesToTopics(
+  dates: string[],
+  topicPlan: KrasgmuTopicPlanRow[],
+): Map<string, MatchedTopic> {
+  const sorted = [...new Set(dates)]
+    .map(raw => ({ raw, date: parseRuFullDate(raw) }))
+    .filter((d): d is { raw: string; date: Date } => d.date !== null)
+    .sort((a, b) => a.date.getTime() - b.date.getTime())
+    .map(d => d.raw);
+  return zipTopics(sorted, topicPlan);
 }

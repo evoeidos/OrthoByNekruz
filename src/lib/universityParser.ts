@@ -116,11 +116,18 @@ export async function fetchUniversityProfile(
 export async function fetchUniversityLectureTopics(
   redis: AppRedis,
   tgId: string,
-): Promise<{ login: string; topics: Record<string, Record<string, MatchedTopic>> }> {
-  const cached = await redis.get<{ login: string; topics: Record<string, Record<string, MatchedTopic>> }>(
-    cacheKey(tgId, 'topics'),
-  );
-  if (cached) return cached;
+): Promise<{
+  login: string;
+  topics: Record<string, Record<string, MatchedTopic>>;
+  practiceTopics: Record<string, Record<string, MatchedTopic>>;
+}> {
+  const cached = await redis.get<{
+    login: string;
+    topics: Record<string, Record<string, MatchedTopic>>;
+    practiceTopics?: Record<string, Record<string, MatchedTopic>>;
+  }>(cacheKey(tgId, 'topics'));
+  // practiceTopics ?? {} — на случай записи старого формата в кэше (до появления практики по циклам).
+  if (cached) return { ...cached, practiceTopics: cached.practiceTopics ?? {} };
 
   const data = await fetchKrasgmuLectureTopics(redis, tgId);
   await redis.set(cacheKey(tgId, 'topics'), data, { ex: CACHE_TTL_SEC });

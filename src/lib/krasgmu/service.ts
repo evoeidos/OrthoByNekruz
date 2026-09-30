@@ -23,7 +23,13 @@ import {
   saveBinding,
   touchValidated,
 } from '@/lib/krasgmu/store';
-import { collectLessonDates, matchDatesToTopics, type MatchedTopic } from '@/lib/krasgmu/topicMatch';
+import {
+  collectLessonDates,
+  enumerateCycleDates,
+  matchDatesToTopics,
+  matchFullDatesToTopics,
+  type MatchedTopic,
+} from '@/lib/krasgmu/topicMatch';
 import type {
   KrasgmuCycle,
   KrasgmuGradeRow,
@@ -31,6 +37,7 @@ import type {
   KrasgmuProfile,
   KrasgmuScheduleDay,
 } from '@/lib/krasgmu/types';
+import { findActiveCycle, krasnoyarskNow } from '@/lib/uniHelpers';
 
 // Личный кабинет живёт на page[common]=user (не page[org]=dean — та страница
 // чисто информационная и не персонализируется). id — цифры из логина ('z93339' -> '93339').
@@ -130,11 +137,22 @@ export async function fetchKrasgmuPhoto(
  * реально встречающегося в расписании, ищет umkd_id по названию дисциплины,
  * забирает тематический план и раскладывает даты по номерам тем по порядку.
  * Дисциплины без совпадения по названию или без распознанных дат — молча пропускаются.
+ *
+ * Отдельно — practiceTopics: то же самое для заглушек «ПРАКТИКА» (реальная
+ * дисциплина которых определяется циклом, см. Цикловое расписание). Даты внутри
+ * цикла не даны напрямую — перечисляем календарные дни цикла, приходящиеся на
+ * дни недели, где в расписании стоит «ПРАКТИКА». Считаем только для АКТИВНОГО
+ * сейчас цикла (не для всех 10+ циклов семестра) — иначе на каждый вызов ушёл бы
+ * лишний запрос тематического плана на цикл.
  */
 export async function fetchKrasgmuLectureTopics(
   redis: AppRedis,
   tgId: string,
-): Promise<{ login: string; topics: Record<string, Record<string, MatchedTopic>> }> {
+): Promise<{
+  login: string;
+  topics: Record<string, Record<string, MatchedTopic>>;
+  practiceTopics: Record<string, Record<string, MatchedTopic>>;
+}> {
   const { cookies, login } = await ensureKrasgmuSession(redis, tgId);
 
   const [scheduleHtml, umkdListHtml] = await Promise.all([
@@ -142,6 +160,7 @@ export async function fetchKrasgmuLectureTopics(
     fetchKrasgmuPage(umkdListPath(login), cookies),
   ]);
   const schedule = parseScheduleHtml(scheduleHtml);
+  const cycles = parseCycleScheduleHtml(scheduleHtml);
   const umkdList = parseUmkdListHtml(umkdListHtml);
 
   const umkdIdBySubject = new Map<string, string>();
@@ -176,5 +195,27 @@ export async function fetchKrasgmuLectureTopics(
     for (const [date, info] of matched) bucket[date] = info;
   }
 
-  return { login, topics };
+  const practiceTopics: Record<string, Record<string, MatchedTopic>> = {};
+
+  const practiceWeekdays = new Set<string>();
+  for (const day of schedule) {
+    if (day.lessons.some(l => l.subject === 'ПРАКТИКА')) practiceWeekdays.add(day.weekday);
+  }
+
+  const activeCycle = practiceWeekdays.size > 0 ? findActiveCycle(cycles, krasnoyarskNow().date) : null;
+  if (activeCycle) {
+    const umkdId = umkdIdBySubject.get(activeCycle.discipline);
+    const cycleDates = umkdId ? enumerateCycleDates(activeCycle, practiceWeekdays) : [];
+    if (umkdId && cycleDates.length > 0) {
+      const planHtml = await fetchKrasgmuPage(topicPlanPath(umkdId, 1), cookies);
+      const topicPlan = parseTopicPlanHtml(planHtml);
+      if (topicPlan.length > 0) {
+        const matched = matchFullDatesToTopics(cycleDates, topicPlan);
+        const bucket = practiceTopics[activeCycle.discipline] ?? (practiceTopics[activeCycle.discipline] = {});
+        for (const [date, info] of matched) bucket[date] = info;
+      }
+    }
+  }
+
+  return { login, topics, practiceTopics };
 }
