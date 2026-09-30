@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { deleteBinding, getBindStatus } from '@/lib/krasgmu/store';
 import {
+  clearUniversityCache,
   fetchUniversityGrades,
   fetchUniversityLectureTopics,
   fetchUniversityMethodichka,
@@ -47,6 +48,7 @@ export async function POST(req: Request) {
 
   if (act === 'unbind') {
     await deleteBinding(redis, identity.tgId);
+    await clearUniversityCache(redis, identity.tgId);
     return NextResponse.json({ success: true, bound: false });
   }
 

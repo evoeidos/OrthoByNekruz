@@ -44,6 +44,20 @@ function methodichkaCacheKey(tlId: string) {
   return `krasgmu_cache:methodichka:${tlId}`;
 }
 
+/**
+ * Сбрасывает кэш расписания/оценок/профиля/тем конкретного пользователя — иначе
+ * после привязки другого аккаунта krasgmu.ru (или отвязки) старые данные могут
+ * ещё до 5 минут отдаваться из кэша, будто это данные нового аккаунта.
+ */
+export async function clearUniversityCache(redis: AppRedis, tgId: string): Promise<void> {
+  await redis.del(
+    cacheKey(tgId, 'schedule'),
+    cacheKey(tgId, 'grades'),
+    cacheKey(tgId, 'profile'),
+    cacheKey(tgId, 'topics'),
+  );
+}
+
 /** Парсинг HTML расписания (Cheerio). */
 export function parseUniversityScheduleHtml(html: string): KrasgmuScheduleDay[] {
   return parseScheduleHtml(html);
