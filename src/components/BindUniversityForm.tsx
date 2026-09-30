@@ -11,19 +11,12 @@ import type {
   UniversityProfile,
   UniversityScheduleDay,
 } from '@/lib/universityParser';
-import type { UniData } from '@/lib/uniHelpers';
+import { getTelegramAuth, type UniData } from '@/lib/uniHelpers';
 
 type BindPhase = 'idle' | 'loading' | 'success' | 'error';
 
 // Индекс совпадает с Date.getDay() (0 — воскресенье).
 const WEEKDAYS_RU = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
-
-function getTelegramAuth() {
-  const telegram_id = localStorage.getItem('user_tg_id') || '';
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const initData = (window as any).Telegram?.WebApp?.initData || '';
-  return { telegram_id, initData };
-}
 
 type BindUniversityFormProps = {
   /** Сообщает наверх текущие ФИО/фото — чтобы показать их, например, в шапке профиля. */

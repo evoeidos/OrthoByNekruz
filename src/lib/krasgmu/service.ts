@@ -10,6 +10,7 @@ import {
 import {
   parseCycleScheduleHtml,
   parseGradesHtml,
+  parseMethodichkaHtml,
   parseProfileHtml,
   parseScheduleHtml,
   parseTopicPlanHtml,
@@ -23,7 +24,13 @@ import {
   touchValidated,
 } from '@/lib/krasgmu/store';
 import { collectLessonDates, matchDatesToTopics, type MatchedTopic } from '@/lib/krasgmu/topicMatch';
-import type { KrasgmuCycle, KrasgmuGradeRow, KrasgmuProfile, KrasgmuScheduleDay } from '@/lib/krasgmu/types';
+import type {
+  KrasgmuCycle,
+  KrasgmuGradeRow,
+  KrasgmuMethodichka,
+  KrasgmuProfile,
+  KrasgmuScheduleDay,
+} from '@/lib/krasgmu/types';
 
 // Личный кабинет живёт на page[common]=user (не page[org]=dean — та страница
 // чисто информационная и не персонализируется). id — цифры из логина ('z93339' -> '93339').
@@ -46,6 +53,9 @@ const umkdListPath = (login: string) =>
 // tl_type: 0 — лекции, 1 — практические занятия.
 const topicPlanPath = (umkdId: string, tlType: 0 | 1) =>
   `/index.php?page%5Borg%5D=dean&cat=oop&mode=umkd&umkd_id=${umkdId}&zaysim_id=0&umkd_page=7|0,1,10,5,3,4&tl_type=${tlType}`;
+// Методические указания для обучающихся по конкретной теме (metod_class=1).
+const methodichkaPath = (tlId: string) =>
+  `/index.php?page%5Borg%5D=umkd_metod_tl&tl_id=${tlId}&metod_type=0&metod_class=1`;
 
 export async function ensureKrasgmuSession(
   redis: AppRedis,
@@ -94,6 +104,16 @@ export async function fetchKrasgmuProfile(
   const { cookies, login } = await ensureKrasgmuSession(redis, tgId);
   const html = await fetchKrasgmuPage(PROFILE_PATH, cookies);
   return { login, profile: parseProfileHtml(html) };
+}
+
+export async function fetchKrasgmuMethodichka(
+  redis: AppRedis,
+  tgId: string,
+  tlId: string,
+): Promise<{ login: string; methodichka: KrasgmuMethodichka | null }> {
+  const { cookies, login } = await ensureKrasgmuSession(redis, tgId);
+  const html = await fetchKrasgmuPage(methodichkaPath(tlId), cookies);
+  return { login, methodichka: parseMethodichkaHtml(html) };
 }
 
 export async function fetchKrasgmuPhoto(

@@ -23,6 +23,14 @@ export const EMPTY_UNI: UniData = {
   checking: true, bound: false, loading: false, schedule: [], cycles: [], grades: [], profile: null, topics: {},
 };
 
+/** Идентификация текущего пользователя для запросов к /api/auth/university/*. */
+export function getTelegramAuth() {
+  const telegram_id = localStorage.getItem('user_tg_id') || '';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const initData = (window as any).Telegram?.WebApp?.initData || '';
+  return { telegram_id, initData };
+}
+
 // Индекс совпадает с getDay() (0 — воскресенье)
 export const WEEKDAYS_RU = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
 export const WEEKDAYS_SHORT = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];

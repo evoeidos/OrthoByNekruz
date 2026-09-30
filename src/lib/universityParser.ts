@@ -8,6 +8,7 @@ import { parseGradesHtml, parseProfileHtml, parseScheduleHtml } from '@/lib/kras
 import {
   fetchKrasgmuGrades,
   fetchKrasgmuLectureTopics,
+  fetchKrasgmuMethodichka,
   fetchKrasgmuProfile,
   fetchKrasgmuSchedule,
 } from '@/lib/krasgmu/service';
@@ -15,6 +16,7 @@ import type { MatchedTopic } from '@/lib/krasgmu/topicMatch';
 import type {
   KrasgmuCycle,
   KrasgmuGradeRow,
+  KrasgmuMethodichka,
   KrasgmuProfile,
   KrasgmuScheduleDay,
   KrasgmuSessionCookies,
@@ -26,13 +28,20 @@ export type { KrasgmuSessionCookies as UniversitySessionCookies };
 export type { KrasgmuProfile as UniversityProfile };
 export type { MatchedTopic as UniversityMatchedTopic };
 export type { KrasgmuCycle as UniversityCycle };
+export type { KrasgmuMethodichka as UniversityMethodichka };
 
 const SCHEDULE_PATH = '/index.php?page%5Borg%5D=dean&cat=schedule';
 const GRADES_PATH = '/index.php?page%5Borg%5D=dean&cat=progress';
 const CACHE_TTL_SEC = 300;
+// Методичка — общий для всех студентов справочный материал по теме, не меняется день ото дня.
+const METHODICHKA_TTL_SEC = 60 * 60 * 24 * 7;
 
 function cacheKey(tgId: string, kind: 'schedule' | 'grades' | 'profile' | 'topics') {
   return `krasgmu_cache:${kind}:${tgId}`;
+}
+
+function methodichkaCacheKey(tlId: string) {
+  return `krasgmu_cache:methodichka:${tlId}`;
 }
 
 /** Парсинг HTML расписания (Cheerio). */
@@ -115,6 +124,22 @@ export async function fetchUniversityLectureTopics(
 
   const data = await fetchKrasgmuLectureTopics(redis, tgId);
   await redis.set(cacheKey(tgId, 'topics'), data, { ex: CACHE_TTL_SEC });
+  return data;
+}
+
+/** Методичка по теме — общий для всех студентов справочный материал, кэшируется по tl_id (не по студенту), на неделю. */
+export async function fetchUniversityMethodichka(
+  redis: AppRedis,
+  tgId: string,
+  tlId: string,
+): Promise<{ login: string; methodichka: KrasgmuMethodichka | null }> {
+  const cached = await redis.get<{ login: string; methodichka: KrasgmuMethodichka | null }>(
+    methodichkaCacheKey(tlId),
+  );
+  if (cached) return cached;
+
+  const data = await fetchKrasgmuMethodichka(redis, tgId, tlId);
+  if (data.methodichka) await redis.set(methodichkaCacheKey(tlId), data, { ex: METHODICHKA_TTL_SEC });
   return data;
 }
 

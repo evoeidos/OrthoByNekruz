@@ -3,6 +3,7 @@ import { deleteBinding, getBindStatus } from '@/lib/krasgmu/store';
 import {
   fetchUniversityGrades,
   fetchUniversityLectureTopics,
+  fetchUniversityMethodichka,
   fetchUniversityProfile,
   fetchUniversitySchedule,
 } from '@/lib/universityParser';
@@ -69,6 +70,12 @@ export async function POST(req: Request) {
     }
     if (act === 'topics') {
       const data = await fetchUniversityLectureTopics(redis, identity.tgId);
+      return NextResponse.json({ success: true, ...data });
+    }
+    if (act === 'methodichka') {
+      const tlId = String(body.tlId || '').trim();
+      if (!tlId) return NextResponse.json({ error: 'tlId is required' }, { status: 400 });
+      const data = await fetchUniversityMethodichka(redis, identity.tgId, tlId);
       return NextResponse.json({ success: true, ...data });
     }
     if (act === 'all') {
