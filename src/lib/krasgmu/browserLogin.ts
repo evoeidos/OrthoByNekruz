@@ -91,8 +91,12 @@ export async function loginKrasgmuViaBrowser(
       );
     });
 
+  // Browserless может отдавать переиспользуемый браузер — без отдельного контекста
+  // куки/сессия одного логина рискуют утечь в другой. Изолированный контекст даёт
+  // своё собственное хранилище независимо от того, что было в браузере до нас.
+  const context = await browser.createBrowserContext();
   try {
-    const page = await browser.newPage();
+    const page = await context.newPage();
     await page.setUserAgent(UA);
     await page.setViewport({ width: 1280, height: 800 });
 
@@ -128,6 +132,7 @@ export async function loginKrasgmuViaBrowser(
     console.error('[krasgmu] Browser login finished without krasgmu.auth cookie — site may have changed');
     throw new KrasgmuAuthError('Не удалось войти на сайт КрасГМУ. Попробуйте позже.', 'form_changed');
   } finally {
+    await context.close().catch(() => {});
     await browser.close();
   }
 }

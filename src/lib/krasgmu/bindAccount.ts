@@ -2,6 +2,7 @@ import type { AppRedis } from '@/lib/redis';
 import { KrasgmuAuthError, loginKrasgmu } from '@/lib/krasgmu/client';
 import { KrasgmuConfigError } from '@/lib/krasgmu/crypto';
 import { saveBinding } from '@/lib/krasgmu/store';
+import { clearUniversityCache } from '@/lib/universityParser';
 
 export type BindUniversityResult =
   | { ok: true; login: string; message: string }
@@ -29,6 +30,9 @@ export async function bindUniversityAccount(
   try {
     const cookies = await loginKrasgmu(loginStr, passStr);
     await saveBinding(redis, tgId, loginStr, passStr, cookies);
+    // Иначе до 5 минут после переподключения к другому аккаунту могут отдаваться
+    // расписание/оценки/профиль предыдущего.
+    await clearUniversityCache(redis, tgId);
     return {
       ok: true,
       login: loginStr,
