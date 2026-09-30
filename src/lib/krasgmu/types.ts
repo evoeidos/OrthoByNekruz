@@ -74,6 +74,17 @@ export type KrasgmuTopicPlanRow = {
   hours: string;
 };
 
+export type KrasgmuMethodichkaChapter = {
+  title: string;
+  paragraphs: string[];
+};
+
+export type KrasgmuMethodichka = {
+  /** «Тема №2. Патофизиология клетки.» */
+  title: string;
+  chapters: KrasgmuMethodichkaChapter[];
+};
+
 export type KrasgmuBindStatus =
   | { bound: false }
   | {

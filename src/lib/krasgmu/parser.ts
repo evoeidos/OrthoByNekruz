@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 import type {
   KrasgmuCycle,
   KrasgmuGradeRow,
+  KrasgmuMethodichka,
   KrasgmuProfile,
   KrasgmuScheduleDay,
   KrasgmuScheduleLesson,
@@ -179,6 +180,61 @@ export function parseGradesHtml(html: string): KrasgmuGradeRow[] {
   });
 
   return rows;
+}
+
+/**
+ * Разворачивает узел в список текстовых блоков. Обёрточные div без своего
+ * текста (только вложенные div) разворачиваются в блоки по одному на
+ * вложенный div — иначе cheerio .text() слепит соседние абзацы без пробела
+ * между ними. Таблицы (ХРОНОКАРТА) превращаются в строки «ячейка — ячейка».
+ */
+function extractTextBlocks($: cheerio.CheerioAPI, $el: cheerio.Cheerio<any>): string[] {
+  if ($el.is('style, script')) return [];
+  if ($el.is('table')) {
+    const rows: string[] = [];
+    $el.find('tr').each((_, tr) => {
+      const cells = $(tr).find('td').map((__, td) => cleanText($(td).text())).get().filter(Boolean);
+      if (cells.length) rows.push(cells.join(' — '));
+    });
+    return rows.length ? [rows.join('\n')] : [];
+  }
+
+  const directText = cleanText($el.clone().children().remove().end().text());
+  const childDivs = $el.children('div');
+  if (!directText && childDivs.length > 0) {
+    return childDivs.toArray().flatMap(d => extractTextBlocks($, $(d)));
+  }
+
+  const text = cleanText($el.text());
+  return text ? [text] : [];
+}
+
+/**
+ * Парсинг методических указаний по теме (page[org]=umkd_metod_tl&tl_id=..&
+ * metod_type=0&metod_class=1|2) — заголовок темы плюс список разделов
+ * (АННОТАЦИЯ, ВОПРОСЫ ПО ТЕМЕ ЗАНЯТИЯ, ТЕСТОВЫЕ ЗАДАНИЯ, ЛИТЕРАТУРА и т.п.),
+ * каждый как заголовок + список текстовых абзацев — для показа в приложении
+ * без перехода на сам сайт.
+ */
+export function parseMethodichkaHtml(html: string): KrasgmuMethodichka | null {
+  const $ = cheerio.load(html);
+  const title = cleanText($('.moduletitle2').first().text());
+  if (!title) return null;
+
+  const chapters: KrasgmuMethodichka['chapters'] = [];
+  $('.modulechapter1 > .modulechapter2').each((_, el) => {
+    const $el = $(el);
+    const chapterTitle = cleanText($el.find('> .modulechaptertitle').first().text());
+    const paragraphs: string[] = [];
+    $el.children().each((__, child) => {
+      const $child = $(child);
+      if ($child.hasClass('modulechaptertitle')) return;
+      paragraphs.push(...extractTextBlocks($, $child));
+    });
+    if (chapterTitle || paragraphs.length) chapters.push({ title: chapterTitle, paragraphs });
+  });
+
+  return { title, chapters };
 }
 
 /**

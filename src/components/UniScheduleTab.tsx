@@ -1,11 +1,14 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, FileText } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileText, Loader2 } from 'lucide-react';
 import type { UniData } from '@/lib/uniHelpers';
 import {
-  krasnoyarskNow, currentWeekDays, parseTimeRange, datesIncludeToday, findMatchingDateEntry, findActiveCycle, MONTHS_GEN,
+  krasnoyarskNow, currentWeekDays, parseTimeRange, datesIncludeToday, findMatchingDateEntry, findActiveCycle,
+  getTelegramAuth, MONTHS_GEN,
 } from '@/lib/uniHelpers';
+import type { UniversityMethodichka } from '@/lib/universityParser';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { UniLockedCard } from './UniLockedCard';
 
 /** Время по Красноярску, обновляется каждые 30 с. */
@@ -20,9 +23,7 @@ function useKrskNow() {
 
 const LESSON_COLORS = ['var(--c-primary)', 'var(--c-info)', 'var(--c-amber)'];
 
-/** Методические указания для обучающихся по конкретной теме (metod_class=1). */
-const methodichkaUrl = (tlId: string) =>
-  `https://krasgmu.ru/index.php?page[org]=umkd_metod_tl&tl_id=${tlId}&metod_type=0&metod_class=1`;
+type MethodichkaState = 'loading' | UniversityMethodichka | null;
 
 export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ uni, onBind }) => {
   const now = useKrskNow();
@@ -30,6 +31,30 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
   const [picked, setPicked] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   useEffect(() => { setExpanded({}); }, [picked]);
+
+  const [openTlId, setOpenTlId] = useState<string | null>(null);
+  const [methodichkas, setMethodichkas] = useState<Record<string, MethodichkaState>>({});
+
+  const openMethodichka = (tlId: string) => {
+    setOpenTlId(tlId);
+    if (methodichkas[tlId] !== undefined) return;
+    setMethodichkas(m => ({ ...m, [tlId]: 'loading' }));
+    (async () => {
+      try {
+        const { telegram_id, initData } = getTelegramAuth();
+        const r = await fetch('/api/auth/university/data', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ telegram_id, initData, action: 'methodichka', tlId }),
+        });
+        const d = await r.json();
+        setMethodichkas(m => ({ ...m, [tlId]: r.ok ? (d.methodichka ?? null) : null }));
+      } catch {
+        setMethodichkas(m => ({ ...m, [tlId]: null }));
+      }
+    })();
+  };
 
   if (!uni.bound) return <UniLockedCard title="Расписание не подключено" loading={uni.checking || uni.loading} onBind={onBind} />;
   if (uni.loading) return <UniLockedCard title="" loading onBind={onBind} />;
@@ -165,16 +190,14 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
               </div>
             )}
             {item.topic && (
-              <a
-                href={methodichkaUrl(item.topic.tlId)}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={e => e.stopPropagation()}
+              <button
+                type="button"
+                onClick={() => openMethodichka(item.topic!.tlId)}
                 className="self-start inline-flex items-center gap-1 text-[11px] font-semibold mt-1.5"
                 style={{ color: 'var(--c-primary)' }}
               >
                 <FileText className="w-3 h-3" /> Методичка
-              </a>
+              </button>
             )}
             {item.meta && <div className="text-[12px] mt-0.5" style={{ color: 'var(--c-muted)' }}>{item.meta}</div>}
             {item.l.dates && <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-text-faint)' }}>{item.l.dates}</div>}
@@ -252,6 +275,58 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
           );
         });
       })()}
+
+      <Dialog open={!!openTlId} onOpenChange={o => { if (!o) setOpenTlId(null); }}>
+        <DialogContent
+          className="max-w-lg w-[92vw] max-h-[85vh] overflow-y-auto rounded-3xl p-5"
+          style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}
+        >
+          {(() => {
+            const data = openTlId ? methodichkas[openTlId] : undefined;
+            if (data === 'loading' || data === undefined) {
+              return (
+                <div className="flex items-center justify-center gap-2 py-10 text-[13px]" style={{ color: 'var(--c-muted)' }}>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Загрузка методички...
+                </div>
+              );
+            }
+            if (!data) {
+              return (
+                <p className="text-[13px] text-center py-10" style={{ color: 'var(--c-muted)' }}>
+                  Не удалось загрузить методичку.
+                </p>
+              );
+            }
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="text-[15px] font-bold leading-snug pr-4" style={{ color: 'var(--c-text)' }}>
+                    {data.title}
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 mt-1">
+                  {data.chapters.map((ch, ci) => (
+                    <div key={ci}>
+                      {ch.title && (
+                        <div className="text-[11px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--c-primary)' }}>
+                          {ch.title}
+                        </div>
+                      )}
+                      <div className="space-y-1.5">
+                        {ch.paragraphs.map((p, pi) => (
+                          <p key={pi} className="text-[13px] leading-relaxed whitespace-pre-line" style={{ color: 'var(--c-text)' }}>
+                            {p}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </>
   );
 };
