@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import type {
+  KrasgmuCycle,
   KrasgmuGradeRow,
   KrasgmuProfile,
   KrasgmuScheduleDay,
@@ -175,6 +176,37 @@ export function parseGradesHtml(html: string): KrasgmuGradeRow[] {
       teacher,
       kind,
     });
+  });
+
+  return rows;
+}
+
+/**
+ * Парсинг циклового расписания (та же страница page[org]=dean&cat=schedule, блок
+ * «Цикловое расписание» над недельной сеткой, table.silverrow.schedule) — на какие
+ * даты семестра группа проходит практику по какой дисциплине и на какой кафедре.
+ * Строки вида «ПРАКТИКА» в обычном недельном расписании — заглушка именно для
+ * этого: реальная дисциплина определяется циклом, в диапазон которого попадает
+ * конкретная дата.
+ */
+export function parseCycleScheduleHtml(html: string): KrasgmuCycle[] {
+  const $ = cheerio.load(html);
+  const rows: KrasgmuCycle[] = [];
+
+  $('table.silverrow.schedule .schedule-row').each((_, row) => {
+    const inner = $(row).children('div').first().children('div');
+    if (inner.length < 2) return;
+
+    const [startDate, endDate] = cleanText($(inner.get(0)).text()).split(/\s*-\s*/);
+    if (!startDate || !endDate) return;
+
+    const disciplineCell = $(inner.get(1)).clone();
+    const address = cleanText(disciplineCell.find('.green').text());
+    disciplineCell.find('.green, strong').remove();
+    const discipline = cleanText(disciplineCell.text()).replace(/-\s*$/, '').trim();
+    if (!discipline) return;
+
+    rows.push({ startDate, endDate, discipline, address });
   });
 
   return rows;

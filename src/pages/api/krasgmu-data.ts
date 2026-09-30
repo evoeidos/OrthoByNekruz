@@ -65,6 +65,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         success: true,
         login: scheduleData.login,
         schedule: scheduleData.schedule,
+        cycles: scheduleData.cycles,
         grades: gradesData.grades,
         profile: profileData.profile,
       });

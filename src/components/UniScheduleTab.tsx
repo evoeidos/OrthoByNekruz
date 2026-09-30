@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { UniData } from '@/lib/uniHelpers';
 import {
-  krasnoyarskNow, currentWeekDays, parseTimeRange, datesIncludeToday, findMatchingDateEntry, MONTHS_GEN,
+  krasnoyarskNow, currentWeekDays, parseTimeRange, datesIncludeToday, findMatchingDateEntry, findActiveCycle, MONTHS_GEN,
 } from '@/lib/uniHelpers';
 import { UniLockedCard } from './UniLockedCard';
 
@@ -41,14 +41,23 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
 
   const today = { day: now.date.getUTCDate(), month: now.date.getUTCMonth() };
   const selDate = week.find(w => w.weekday === selected);
+  // «ПРАКТИКА» в недельной сетке — заглушка: реальная дисциплина зависит от того,
+  // в диапазон дат какого цикла (циклового расписания) попадает просматриваемый день.
+  const activeCycle = selDate ? findActiveCycle(uni.cycles, selDate.date) : null;
 
   const withState = lessons.map(l => {
+    const isCyclePlaceholder = l.subject === 'ПРАКТИКА';
+    const subject = isCyclePlaceholder && activeCycle ? activeCycle.discipline : l.subject;
+    const room = isCyclePlaceholder && activeCycle ? activeCycle.address : l.room;
     const dateEntry = selDate ? findMatchingDateEntry(l.dates, { day: selDate.num, month: selDate.month }) : null;
     return {
       l,
+      subject,
+      room,
+      cycle: isCyclePlaceholder ? activeCycle : null,
       range: parseTimeRange(l.time),
       dateMatch: datesIncludeToday(l.dates, today),
-      topic: dateEntry ? uni.topics[l.subject]?.[dateEntry] : undefined,
+      topic: dateEntry ? uni.topics[subject]?.[dateEntry] : undefined,
     };
   });
   const nextIdx = isToday
@@ -97,7 +106,7 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
         <p className="text-[12.5px] text-center py-6" style={{ color: 'var(--c-muted)' }}>Занятий нет.</p>
       )}
 
-      {withState.map(({ l, range, dateMatch, topic }, i) => {
+      {withState.map(({ l, subject, room, cycle, range, dateMatch, topic }, i) => {
         const live = isToday && dateMatch && !!range && now.minutes >= range[0] && now.minutes < range[1];
         const past = isToday && dateMatch && !!range && now.minutes >= range[1];
         const next = !live && i === nextIdx;
@@ -105,7 +114,7 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
           ? `Идёт сейчас · ещё ${range[1] - now.minutes} мин`
           : next && range ? `Далее · через ${range[0] - now.minutes} мин` : '';
         const pct = live && range ? Math.round(((now.minutes - range[0]) / (range[1] - range[0])) * 100) : 0;
-        const meta = [l.type, l.room, l.teacher].filter(Boolean).join(' · ');
+        const meta = [l.type, room, l.teacher].filter(Boolean).join(' · ');
         return (
           <div
             key={i}
@@ -132,7 +141,7 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
                   {badge}
                 </span>
               )}
-              <div className="text-[14px] font-bold leading-snug" style={{ color: 'var(--c-text)' }}>{l.subject}</div>
+              <div className="text-[14px] font-bold leading-snug" style={{ color: 'var(--c-text)' }}>{subject}</div>
               {topic && (
                 <div className="text-[12.5px] mt-1 leading-snug" style={{ color: 'var(--c-text)' }}>
                   <span className="font-bold" style={{ color: 'var(--c-primary)' }}>№{topic.seq}</span> {topic.topic}
@@ -140,6 +149,11 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
               )}
               {meta && <div className="text-[12px] mt-0.5" style={{ color: 'var(--c-muted)' }}>{meta}</div>}
               {l.dates && <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-text-faint)' }}>{l.dates}</div>}
+              {cycle && (
+                <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-text-faint)' }}>
+                  Цикл: {cycle.startDate} – {cycle.endDate}
+                </div>
+              )}
               {live && (
                 <div className="h-[3px] rounded-full mt-2 overflow-hidden" style={{ background: 'var(--c-border)' }}>
                   <div className="h-full" style={{ width: `${pct}%`, background: 'var(--c-primary)' }} />

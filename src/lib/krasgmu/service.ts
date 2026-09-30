@@ -8,6 +8,7 @@ import {
   validateSession,
 } from '@/lib/krasgmu/client';
 import {
+  parseCycleScheduleHtml,
   parseGradesHtml,
   parseProfileHtml,
   parseScheduleHtml,
@@ -22,7 +23,7 @@ import {
   touchValidated,
 } from '@/lib/krasgmu/store';
 import { collectLessonDates, matchDatesToTopics, type MatchedTopic } from '@/lib/krasgmu/topicMatch';
-import type { KrasgmuGradeRow, KrasgmuProfile, KrasgmuScheduleDay } from '@/lib/krasgmu/types';
+import type { KrasgmuCycle, KrasgmuGradeRow, KrasgmuProfile, KrasgmuScheduleDay } from '@/lib/krasgmu/types';
 
 // Личный кабинет живёт на page[common]=user (не page[org]=dean — та страница
 // чисто информационная и не персонализируется). id — цифры из логина ('z93339' -> '93339').
@@ -71,10 +72,10 @@ export async function ensureKrasgmuSession(
 export async function fetchKrasgmuSchedule(
   redis: AppRedis,
   tgId: string,
-): Promise<{ login: string; schedule: KrasgmuScheduleDay[] }> {
+): Promise<{ login: string; schedule: KrasgmuScheduleDay[]; cycles: KrasgmuCycle[] }> {
   const { cookies, login } = await ensureKrasgmuSession(redis, tgId);
   const html = await fetchKrasgmuPage(SCHEDULE_PATH, cookies);
-  return { login, schedule: parseScheduleHtml(html) };
+  return { login, schedule: parseScheduleHtml(html), cycles: parseCycleScheduleHtml(html) };
 }
 
 export async function fetchKrasgmuGrades(

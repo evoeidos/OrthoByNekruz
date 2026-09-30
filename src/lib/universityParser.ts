@@ -13,6 +13,7 @@ import {
 } from '@/lib/krasgmu/service';
 import type { MatchedTopic } from '@/lib/krasgmu/topicMatch';
 import type {
+  KrasgmuCycle,
   KrasgmuGradeRow,
   KrasgmuProfile,
   KrasgmuScheduleDay,
@@ -24,6 +25,7 @@ export type { KrasgmuScheduleDay as UniversityScheduleDay };
 export type { KrasgmuSessionCookies as UniversitySessionCookies };
 export type { KrasgmuProfile as UniversityProfile };
 export type { MatchedTopic as UniversityMatchedTopic };
+export type { KrasgmuCycle as UniversityCycle };
 
 const SCHEDULE_PATH = '/index.php?page%5Borg%5D=dean&cat=schedule';
 const GRADES_PATH = '/index.php?page%5Borg%5D=dean&cat=progress';
@@ -59,11 +61,12 @@ export async function fetchUniversityPage(
 export async function fetchUniversitySchedule(
   redis: AppRedis,
   tgId: string,
-): Promise<{ login: string; schedule: KrasgmuScheduleDay[] }> {
-  const cached = await redis.get<{ login: string; schedule: KrasgmuScheduleDay[] }>(
+): Promise<{ login: string; schedule: KrasgmuScheduleDay[]; cycles: KrasgmuCycle[] }> {
+  const cached = await redis.get<{ login: string; schedule: KrasgmuScheduleDay[]; cycles?: KrasgmuCycle[] }>(
     cacheKey(tgId, 'schedule'),
   );
-  if (cached) return cached;
+  // cycles?? [] — на случай, если в кэше ещё лежит запись старого формата (до появления циклов).
+  if (cached) return { ...cached, cycles: cached.cycles ?? [] };
 
   const data = await fetchKrasgmuSchedule(redis, tgId);
   await redis.set(cacheKey(tgId, 'schedule'), data, { ex: CACHE_TTL_SEC });
