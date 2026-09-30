@@ -33,6 +33,15 @@ async function clickByExactText(
   return true;
 }
 
+/** Полный wss-адрес, либо собирается из токена (стандартный эндпоинт Browserless). */
+function browserlessEndpoint(): string {
+  if (process.env.BROWSERLESS_WS_ENDPOINT) return process.env.BROWSERLESS_WS_ENDPOINT;
+  if (process.env.BROWSERLESS_TOKEN) {
+    return `wss://production-sfo.browserless.io?token=${process.env.BROWSERLESS_TOKEN}`;
+  }
+  return '';
+}
+
 /**
  * Вход на krasgmu.ru требует настоящего браузера: сайт за DDoS-Guard, который
  * пропускает обычные GET через fetch(), но POST логина молча игнорирует (200 без
@@ -40,10 +49,14 @@ async function clickByExactText(
  * похож на реальный Chrome — простым HTTP-клиентом это не обойти (подтверждено
  * побайтовым сравнением заголовков с DevTools).
  *
- * Используем @sparticuz/chromium — сборка без внешних системных библиотек (та же,
- * что для AWS Lambda), т.к. обычный playwright/puppeteer Chromium на урезанном
- * Docker-образе Timeweb падает с "missing shared libraries" даже после
- * `playwright install-deps` (сборка там идёт не от root, apt недоступен).
+ * Раньше запускали Chromium локально на сервере (@sparticuz/chromium — сборка без
+ * внешних системных библиотек, как для AWS Lambda), но на Timeweb рантайм-образ
+ * не наследует системные библиотеки, настроенные для сборки (даже когда libnss3
+ * и т.п. явно прописаны в «Зависимостях» приложения) — Chromium падает с
+ * "libnss3.so: cannot open shared object file". Root-доступа для apt-get в
+ * рантайм-контейнере тоже нет. Поэтому подключаемся к браузеру, который выполняется
+ * не у нас на сервере, а в инфраструктуре Browserless — системные библиотеки там
+ * не наша забота.
  *
  * После входа возвращаем куки из браузерного контекста — дальше расписание и оценки
  * читаются обычным fetch() (эти GET-запросы DDoS-Guard не блокирует).
@@ -52,33 +65,28 @@ export async function loginKrasgmuViaBrowser(
   login: string,
   password: string,
 ): Promise<KrasgmuSessionCookies> {
-  const mods = await Promise.all([
-    import('@sparticuz/chromium'),
-    import('puppeteer-core'),
-  ]).catch(() => null);
-  if (!mods) {
+  const wsEndpoint = browserlessEndpoint();
+  if (!wsEndpoint) {
     throw new KrasgmuAuthError(
-      'Браузерный движок не установлен на сервере (@sparticuz/chromium / puppeteer-core).',
+      'Удалённый браузер не настроен на сервере (BROWSERLESS_WS_ENDPOINT / BROWSERLESS_TOKEN).',
       'browser_unavailable',
     );
   }
-  const chromium = mods[0].default;
-  const puppeteer = mods[1].default;
 
-  if ('setGraphicsMode' in chromium) {
-    (chromium as unknown as { setGraphicsMode: boolean }).setGraphicsMode = false;
+  const mod = await import('puppeteer-core').catch(() => null);
+  if (!mod) {
+    throw new KrasgmuAuthError(
+      'Браузерный движок не установлен на сервере (puppeteer-core).',
+      'browser_unavailable',
+    );
   }
+  const puppeteer = mod.default;
 
   const browser = await puppeteer
-    .launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-    })
+    .connect({ browserWSEndpoint: wsEndpoint })
     .catch((e: unknown) => {
       throw new KrasgmuAuthError(
-        `Не удалось запустить браузер на сервере: ${e instanceof Error ? e.message : String(e)}`,
+        `Не удалось подключиться к удалённому браузеру: ${e instanceof Error ? e.message : String(e)}`,
         'browser_unavailable',
       );
     });
