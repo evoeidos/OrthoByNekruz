@@ -5,6 +5,7 @@ import { Loader2, Link2, Unlink, Calendar, GraduationCap, ChevronDown, ChevronUp
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import type {
+  UniversityCycle,
   UniversityGradeRow,
   UniversityMatchedTopic,
   UniversityProfile,
@@ -42,6 +43,7 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
   const [boundLogin, setBoundLogin] = useState('');
   const [checking, setChecking] = useState(true);
   const [schedule, setSchedule] = useState<UniversityScheduleDay[]>([]);
+  const [cycles, setCycles] = useState<UniversityCycle[]>([]);
   const [grades, setGrades] = useState<UniversityGradeRow[]>([]);
   const [profile, setProfile] = useState<UniversityProfile | null>(null);
   const [topics, setTopics] = useState<Record<string, Record<string, UniversityMatchedTopic>>>({});
@@ -67,8 +69,8 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
   }, [photoUrl]);
 
   useEffect(() => {
-    onDataChange?.({ checking, bound, loading: dataLoading, schedule, grades, profile, topics });
-  }, [checking, bound, dataLoading, schedule, grades, profile, topics, onDataChange]);
+    onDataChange?.({ checking, bound, loading: dataLoading, schedule, cycles, grades, profile, topics });
+  }, [checking, bound, dataLoading, schedule, cycles, grades, profile, topics, onDataChange]);
 
   useEffect(() => {
     onProfileChange?.(profile, photoUrl);
@@ -146,6 +148,7 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Ошибка загрузки');
       setSchedule(d.schedule ?? []);
+      setCycles(d.cycles ?? []);
       setGrades(d.grades ?? []);
       setProfile(d.profile ?? null);
       if (d.login) setBoundLogin(d.login);
@@ -205,6 +208,7 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
     setBound(false);
     setBoundLogin('');
     setSchedule([]);
+    setCycles([]);
     setGrades([]);
     setProfile(null);
     setTopics({});

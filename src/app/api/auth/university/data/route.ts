@@ -81,6 +81,7 @@ export async function POST(req: Request) {
         success: true,
         login: scheduleData.login,
         schedule: scheduleData.schedule,
+        cycles: scheduleData.cycles,
         grades: gradesData.grades,
         profile: profileData.profile,
       });

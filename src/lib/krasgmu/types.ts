@@ -50,6 +50,14 @@ export type KrasgmuProfile = {
   status: string;
 };
 
+export type KrasgmuCycle = {
+  /** «1 сентября 2026» — с годом, в отличие от KrasgmuScheduleLesson.dates. */
+  startDate: string;
+  endDate: string;
+  discipline: string;
+  address: string;
+};
+
 export type KrasgmuUmkdEntry = {
   umkdId: string;
   discipline: string;

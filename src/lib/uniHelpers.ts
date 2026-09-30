@@ -1,4 +1,5 @@
 import type {
+  UniversityCycle,
   UniversityGradeRow,
   UniversityMatchedTopic,
   UniversityProfile,
@@ -10,6 +11,8 @@ export type UniData = {
   bound: boolean;
   loading: boolean;
   schedule: UniversityScheduleDay[];
+  /** Цикловое расписание (практика/производственная практика по датам семестра) — заглушки «ПРАКТИКА» в schedule резолвятся через это. */
+  cycles: UniversityCycle[];
   grades: UniversityGradeRow[];
   profile: UniversityProfile | null;
   /** Темы лекций/практик из УМКД, сшитые по датам: дисциплина → дата → тема. Догружается отдельно и позже остального. */
@@ -17,7 +20,7 @@ export type UniData = {
 };
 
 export const EMPTY_UNI: UniData = {
-  checking: true, bound: false, loading: false, schedule: [], grades: [], profile: null, topics: {},
+  checking: true, bound: false, loading: false, schedule: [], cycles: [], grades: [], profile: null, topics: {},
 };
 
 // Индекс совпадает с getDay() (0 — воскресенье)
@@ -47,8 +50,28 @@ export function currentWeekDays() {
   const dow = (weekdayIdx + 6) % 7; // 0 = Пн
   return [1, 2, 3, 4, 5, 6].map((wd, i) => {
     const d = new Date(date.getTime() + (i - dow) * 86400000);
-    return { weekday: WEEKDAYS_RU[wd], short: WEEKDAYS_SHORT[wd], num: d.getUTCDate(), month: d.getUTCMonth() };
+    return { weekday: WEEKDAYS_RU[wd], short: WEEKDAYS_SHORT[wd], num: d.getUTCDate(), month: d.getUTCMonth(), date: d };
   });
+}
+
+/** «1 сентября 2026» → Date (UTC-полночь), либо null при нераспознанном формате. */
+export function parseRuFullDate(s: string): Date | null {
+  const m = s.match(/(\d{1,2})\s+([а-яё]+)\s+(\d{4})/i);
+  if (!m) return null;
+  const month = MONTHS_GEN.indexOf(m[2].toLowerCase());
+  if (month < 0) return null;
+  return new Date(Date.UTC(+m[3], month, +m[1]));
+}
+
+/** Цикл (практика/производственная практика), в диапазон дат которого попадает заданный день. */
+export function findActiveCycle(cycles: UniversityCycle[], date: Date): UniversityCycle | null {
+  const t = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  for (const c of cycles) {
+    const start = parseRuFullDate(c.startDate);
+    const end = parseRuFullDate(c.endDate);
+    if (start && end && t >= start.getTime() && t <= end.getTime()) return c;
+  }
+  return null;
 }
 
 /** «08:00 / 09:30», «08.00-09.30» и т.п. → минуты начала и конца. */
