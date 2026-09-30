@@ -2,6 +2,7 @@ import { MONTHS_GEN } from '@/lib/uniHelpers';
 import type { KrasgmuScheduleDay, KrasgmuTopicPlanRow } from '@/lib/krasgmu/types';
 
 export type MatchedTopic = {
+  tlId: string;
   seq: number;
   topic: string;
   section: string;
@@ -58,7 +59,7 @@ export function matchDatesToTopics(
   const map = new Map<string, MatchedTopic>();
   sortedDates.forEach((d, i) => {
     const t = sortedTopics[i];
-    if (t) map.set(d.raw, { seq: t.seq, topic: t.topic, section: t.section, hours: t.hours });
+    if (t) map.set(d.raw, { tlId: t.tlId, seq: t.seq, topic: t.topic, section: t.section, hours: t.hours });
   });
   return map;
 }

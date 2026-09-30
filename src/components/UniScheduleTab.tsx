@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileText } from 'lucide-react';
 import type { UniData } from '@/lib/uniHelpers';
 import {
   krasnoyarskNow, currentWeekDays, parseTimeRange, datesIncludeToday, findMatchingDateEntry, findActiveCycle, MONTHS_GEN,
@@ -19,6 +19,10 @@ function useKrskNow() {
 }
 
 const LESSON_COLORS = ['var(--c-primary)', 'var(--c-info)', 'var(--c-amber)'];
+
+/** Методические указания для обучающихся по конкретной теме (metod_class=1). */
+const methodichkaUrl = (tlId: string) =>
+  `https://krasgmu.ru/index.php?page[org]=umkd_metod_tl&tl_id=${tlId}&metod_type=0&metod_class=1`;
 
 export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ uni, onBind }) => {
   const now = useKrskNow();
@@ -159,6 +163,18 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
               <div className="text-[12.5px] mt-1 leading-snug" style={{ color: 'var(--c-text)' }}>
                 <span className="font-bold" style={{ color: 'var(--c-primary)' }}>№{item.topic.seq}</span> {item.topic.topic}
               </div>
+            )}
+            {item.topic && (
+              <a
+                href={methodichkaUrl(item.topic.tlId)}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={e => e.stopPropagation()}
+                className="self-start inline-flex items-center gap-1 text-[11px] font-semibold mt-1.5"
+                style={{ color: 'var(--c-primary)' }}
+              >
+                <FileText className="w-3 h-3" /> Методичка
+              </a>
             )}
             {item.meta && <div className="text-[12px] mt-0.5" style={{ color: 'var(--c-muted)' }}>{item.meta}</div>}
             {item.l.dates && <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-text-faint)' }}>{item.l.dates}</div>}
