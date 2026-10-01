@@ -70,7 +70,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const email = normalizeEmail(String(req.body?.email || ''));
       const password = String(req.body?.password || '');
       const account = await getAccountByEmail(redis, email);
-      if (!account || !verifyPassword(password, account.passwordSalt, account.passwordHash)) {
+      if (
+        !account
+        || !account.passwordHash
+        || !account.passwordSalt
+        || !verifyPassword(password, account.passwordSalt, account.passwordHash)
+      ) {
         return res.status(401).json({ error: 'Неверный email или пароль.' });
       }
       // Антишаринг: новый sessionId выкидывает другие устройства
