@@ -141,6 +141,21 @@ export function WebAuthScreen({ onReady, initialMode = 'login' }: Props) {
           {message && (
             <p className="text-center text-[13px] text-emerald-300">{message}</p>
           )}
+          {mode !== 'forgot' && (
+            <>
+              <div className="flex items-center gap-3 py-1">
+                <div className="h-px flex-1 bg-white/10" />
+                <span className="text-[11px] text-white/30">или</span>
+                <div className="h-px flex-1 bg-white/10" />
+              </div>
+              <a
+                href="/api/auth/telegram-oidc/start"
+                className="w-full h-12 rounded-2xl text-[14px] font-medium flex items-center justify-center gap-2 bg-white/[0.05] border border-white/10 text-white"
+              >
+                Войти через Telegram
+              </a>
+            </>
+          )}
           <div className="flex flex-col gap-2 pt-1">
             {mode === 'login' && (
               <>

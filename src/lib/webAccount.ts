@@ -3,9 +3,10 @@ import type { AppRedis } from '@/lib/redis';
 
 export type WebAccount = {
   id: string;
-  email: string;
-  passwordHash: string;
-  passwordSalt: string;
+  // Аккаунты, созданные через Telegram OIDC-вход, обходятся без email/пароля.
+  email: string | null;
+  passwordHash: string | null;
+  passwordSalt: string | null;
   telegramId: string | null;
   sessionId: string;
   createdAt: string;
@@ -83,7 +84,9 @@ export async function getAccountByTelegramId(redis: AppRedis, tgId: string): Pro
 
 export async function saveAccount(redis: AppRedis, account: WebAccount): Promise<void> {
   await redis.set(accountKey(account.id), account);
-  await redis.set(emailKey(account.email), account.id);
+  if (account.email) {
+    await redis.set(emailKey(account.email), account.id);
+  }
   if (account.telegramId) {
     await redis.set(tgKey(account.telegramId), account.id);
   }
@@ -106,6 +109,27 @@ export async function createAccount(
     passwordHash: hash,
     passwordSalt: salt,
     telegramId: null,
+    sessionId: newSessionId(),
+    createdAt: new Date().toISOString(),
+  };
+  await saveAccount(redis, account);
+  return account;
+}
+
+/** Аккаунт по входу через Telegram OIDC — без email/пароля, telegramId уже проверен. */
+export async function createTelegramAccount(
+  redis: AppRedis,
+  telegramId: string,
+): Promise<WebAccount> {
+  const tg = String(telegramId).trim();
+  const existing = await getAccountByTelegramId(redis, tg);
+  if (existing) return existing;
+  const account: WebAccount = {
+    id: newAccountId(),
+    email: null,
+    passwordHash: null,
+    passwordSalt: null,
+    telegramId: tg,
     sessionId: newSessionId(),
     createdAt: new Date().toISOString(),
   };
@@ -139,7 +163,7 @@ export async function linkTelegramToAccount(
 
 export type PublicAccount = {
   id: string;
-  email: string;
+  email: string | null;
   telegramId: string | null;
   needsTelegramLink: boolean;
 };

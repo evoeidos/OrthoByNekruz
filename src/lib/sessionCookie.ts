@@ -55,19 +55,21 @@ export function readSessionFromCookieHeader(cookieHeader: string | null | undefi
   return null;
 }
 
-export function setSessionCookie(res: NextApiResponse, aid: string, sid: string): void {
+export function buildSessionCookieHeader(aid: string, sid: string): string {
   const value = encodeSessionCookie(aid, sid);
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  res.setHeader(
-    'Set-Cookie',
-    `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${MAX_AGE_SEC}${secure}`,
-  );
+  return `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${MAX_AGE_SEC}${secure}`;
+}
+
+export function buildClearSessionCookieHeader(): string {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
+}
+
+export function setSessionCookie(res: NextApiResponse, aid: string, sid: string): void {
+  res.setHeader('Set-Cookie', buildSessionCookieHeader(aid, sid));
 }
 
 export function clearSessionCookie(res: NextApiResponse): void {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  res.setHeader(
-    'Set-Cookie',
-    `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`,
-  );
+  res.setHeader('Set-Cookie', buildClearSessionCookieHeader());
 }
