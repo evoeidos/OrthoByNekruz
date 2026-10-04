@@ -8,20 +8,22 @@ import { parseGradesHtml, parseProfileHtml, parseScheduleHtml } from '@/lib/kras
 import {
   fetchKrasgmuGrades,
   fetchKrasgmuLectureTopics,
-  fetchKrasgmuLibrary,
+  fetchKrasgmuLibraryDisciplines,
   fetchKrasgmuMethodichka,
   fetchKrasgmuProfile,
   fetchKrasgmuSchedule,
+  fetchKrasgmuTopicPlan,
 } from '@/lib/krasgmu/service';
 import type { MatchedTopic } from '@/lib/krasgmu/topicMatch';
 import type {
   KrasgmuCycle,
   KrasgmuGradeRow,
-  KrasgmuLibrarySubject,
+  KrasgmuLibraryDiscipline,
   KrasgmuMethodichka,
   KrasgmuProfile,
   KrasgmuScheduleDay,
   KrasgmuSessionCookies,
+  KrasgmuTopicPlan,
 } from '@/lib/krasgmu/types';
 
 export type { KrasgmuGradeRow as UniversityGradeRow };
@@ -31,7 +33,8 @@ export type { KrasgmuProfile as UniversityProfile };
 export type { MatchedTopic as UniversityMatchedTopic };
 export type { KrasgmuCycle as UniversityCycle };
 export type { KrasgmuMethodichka as UniversityMethodichka };
-export type { KrasgmuLibrarySubject as UniversityLibrarySubject };
+export type { KrasgmuLibraryDiscipline as UniversityLibraryDiscipline };
+export type { KrasgmuTopicPlan as UniversityTopicPlan };
 
 const SCHEDULE_PATH = '/index.php?page%5Borg%5D=dean&cat=schedule';
 const GRADES_PATH = '/index.php?page%5Borg%5D=dean&cat=progress';
@@ -155,18 +158,35 @@ export async function fetchUniversityLectureTopics(
   return data;
 }
 
-/** Полный каталог тем (лекции + практики) всех дисциплин студента, без фильтра по расписанию — для библиотеки методичек. */
+/** Список дисциплин студента для библиотеки методичек (без тем). */
 export async function fetchUniversityLibrary(
   redis: AppRedis,
   tgId: string,
-): Promise<{ login: string; subjects: KrasgmuLibrarySubject[] }> {
-  const cached = await redis.get<{ login: string; subjects: KrasgmuLibrarySubject[] }>(
+): Promise<{ login: string; disciplines: KrasgmuLibraryDiscipline[] }> {
+  const cached = await redis.get<{ login: string; disciplines: KrasgmuLibraryDiscipline[] }>(
     cacheKey(tgId, 'library'),
   );
   if (cached) return cached;
 
-  const data = await fetchKrasgmuLibrary(redis, tgId);
+  const data = await fetchKrasgmuLibraryDisciplines(redis, tgId);
   await redis.set(cacheKey(tgId, 'library'), data, { ex: LIBRARY_TTL_SEC });
+  return data;
+}
+
+/** Тематический план УМКД — общий для всех студентов по umkd_id, кэшируется глобально на неделю. */
+export async function fetchUniversityTopicPlan(
+  redis: AppRedis,
+  tgId: string,
+  umkdId: string,
+): Promise<KrasgmuTopicPlan> {
+  const key = `krasgmu_cache:topicplan:${umkdId}`;
+  const cached = await redis.get<KrasgmuTopicPlan>(key);
+  if (cached) return cached;
+
+  const data = await fetchKrasgmuTopicPlan(redis, tgId, umkdId);
+  if (data.lectures.length + data.practice.length > 0) {
+    await redis.set(key, data, { ex: LIBRARY_TTL_SEC });
+  }
   return data;
 }
 

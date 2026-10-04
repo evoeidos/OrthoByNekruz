@@ -4,43 +4,75 @@ import React, { useEffect, useState } from 'react';
 import { BookOpen, ChevronDown, ChevronUp, FileText, Loader2 } from 'lucide-react';
 import type { UniData } from '@/lib/uniHelpers';
 import { getTelegramAuth } from '@/lib/uniHelpers';
-import type { UniversityLibrarySubject, UniversityMethodichka } from '@/lib/universityParser';
+import type { UniversityLibraryDiscipline, UniversityMethodichka, UniversityTopicPlan } from '@/lib/universityParser';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { UniLockedCard } from './UniLockedCard';
 
-type LibraryState = 'idle' | 'loading' | { error: string } | UniversityLibrarySubject[];
+type DisciplinesState = 'idle' | 'loading' | { error: string } | UniversityLibraryDiscipline[];
+type TopicPlanState = 'loading' | UniversityTopicPlan | { error: string };
 type MethodichkaState = 'loading' | UniversityMethodichka | { error: string };
 
+async function postUniData(body: Record<string, unknown>): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
+  const { telegram_id, initData } = getTelegramAuth();
+  const r = await fetch('/api/auth/university/data', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ telegram_id, initData, ...body }),
+  });
+  const data = await r.json();
+  return { ok: r.ok, status: r.status, data };
+}
+
 export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ uni, onBind }) => {
-  const [subjects, setSubjects] = useState<LibraryState>('idle');
+  const [disciplines, setDisciplines] = useState<DisciplinesState>('idle');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [topicPlans, setTopicPlans] = useState<Record<string, TopicPlanState>>({});
 
   const [openTlId, setOpenTlId] = useState<string | null>(null);
   const [methodichkas, setMethodichkas] = useState<Record<string, MethodichkaState>>({});
 
   useEffect(() => {
-    if (!uni.bound || uni.checking || subjects !== 'idle') return;
-    setSubjects('loading');
+    if (!uni.bound || uni.checking || disciplines !== 'idle') return;
+    setDisciplines('loading');
     (async () => {
       try {
-        const { telegram_id, initData } = getTelegramAuth();
-        const r = await fetch('/api/auth/university/data', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ telegram_id, initData, action: 'library' }),
-        });
-        const d = await r.json();
-        if (!r.ok) {
-          setSubjects({ error: `${d.error || 'Ошибка сервера'} (HTTP ${r.status})` });
+        const { ok, status, data } = await postUniData({ action: 'library' });
+        if (!ok) {
+          setDisciplines({ error: `${data.error || 'Ошибка сервера'} (HTTP ${status})` });
         } else {
-          setSubjects(d.subjects ?? []);
+          setDisciplines((data.disciplines as UniversityLibraryDiscipline[]) ?? []);
         }
       } catch (e) {
-        setSubjects({ error: e instanceof Error ? e.message : 'Сетевая ошибка' });
+        setDisciplines({ error: e instanceof Error ? e.message : 'Сетевая ошибка' });
       }
     })();
-  }, [uni.bound, uni.checking, subjects]);
+  }, [uni.bound, uni.checking, disciplines]);
+
+  const toggleDiscipline = (d: UniversityLibraryDiscipline) => {
+    const next = expanded === d.umkdId ? null : d.umkdId;
+    setExpanded(next);
+    if (!next || topicPlans[d.umkdId] !== undefined) return;
+    setTopicPlans(p => ({ ...p, [d.umkdId]: 'loading' }));
+    (async () => {
+      try {
+        const { ok, status, data } = await postUniData({ action: 'library_topics', umkdId: d.umkdId });
+        if (!ok) {
+          setTopicPlans(p => ({ ...p, [d.umkdId]: { error: `${data.error || 'Ошибка сервера'} (HTTP ${status})` } }));
+        } else {
+          setTopicPlans(p => ({
+            ...p,
+            [d.umkdId]: {
+              lectures: (data.lectures as UniversityTopicPlan['lectures']) ?? [],
+              practice: (data.practice as UniversityTopicPlan['practice']) ?? [],
+            },
+          }));
+        }
+      } catch (e) {
+        setTopicPlans(p => ({ ...p, [d.umkdId]: { error: e instanceof Error ? e.message : 'Сетевая ошибка' } }));
+      }
+    })();
+  };
 
   const openMethodichka = (tlId: string) => {
     setOpenTlId(tlId);
@@ -48,20 +80,13 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
     setMethodichkas(m => ({ ...m, [tlId]: 'loading' }));
     (async () => {
       try {
-        const { telegram_id, initData } = getTelegramAuth();
-        const r = await fetch('/api/auth/university/data', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ telegram_id, initData, action: 'methodichka', tlId }),
-        });
-        const d = await r.json();
-        if (!r.ok) {
-          setMethodichkas(m => ({ ...m, [tlId]: { error: `${d.error || 'Ошибка сервера'} (HTTP ${r.status}${d.code ? `, ${d.code}` : ''})` } }));
-        } else if (!d.methodichka) {
+        const { ok, status, data } = await postUniData({ action: 'methodichka', tlId });
+        if (!ok) {
+          setMethodichkas(m => ({ ...m, [tlId]: { error: `${data.error || 'Ошибка сервера'} (HTTP ${status}${data.code ? `, ${data.code}` : ''})` } }));
+        } else if (!data.methodichka) {
           setMethodichkas(m => ({ ...m, [tlId]: { error: 'У этой темы нет методических указаний для обучающихся на сайте (либо не удалось распознать страницу).' } }));
         } else {
-          setMethodichkas(m => ({ ...m, [tlId]: d.methodichka }));
+          setMethodichkas(m => ({ ...m, [tlId]: data.methodichka as UniversityMethodichka }));
         }
       } catch (e) {
         setMethodichkas(m => ({ ...m, [tlId]: { error: e instanceof Error ? e.message : 'Сетевая ошибка' } }));
@@ -71,49 +96,68 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
 
   if (!uni.bound) return <UniLockedCard title="Библиотека методичек не подключена" loading={uni.checking} onBind={onBind} />;
 
-  if (subjects === 'idle' || subjects === 'loading') {
+  if (disciplines === 'idle' || disciplines === 'loading') {
     return (
       <div className="flex items-center justify-center gap-2 py-10 text-[13px]" style={{ color: 'var(--c-muted)' }}>
-        <Loader2 className="w-4 h-4 animate-spin" /> Собираем каталог дисциплин...
+        <Loader2 className="w-4 h-4 animate-spin" /> Загружаем дисциплины...
       </div>
     );
   }
 
-  if ('error' in subjects) {
+  if ('error' in disciplines) {
     return (
       <p className="text-[12.5px] text-center py-6 px-4" style={{ color: 'var(--c-muted)' }}>
-        {subjects.error}
+        {disciplines.error}
       </p>
     );
   }
 
-  if (subjects.length === 0) {
+  if (disciplines.length === 0) {
     return (
       <p className="text-[12.5px] text-center py-6" style={{ color: 'var(--c-muted)' }}>
-        Не нашли ни одной дисциплины с тематическим планом на сайте.
+        Не нашли ни одной дисциплины на сайте.
       </p>
     );
   }
+
+  const renderTopicRows = (rows: UniversityTopicPlan['lectures'], kind: 'l' | 'p') => rows.map(row => (
+    <button
+      key={`${kind}-${row.tlId}`}
+      type="button"
+      onClick={() => openMethodichka(row.tlId)}
+      className="w-full flex items-start gap-2.5 px-3.5 py-2.5 text-left active:scale-[0.99] transition-transform"
+    >
+      <FileText className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: 'var(--c-primary)' }} />
+      <div className="flex-1 min-w-0">
+        <div className="text-[12.5px] leading-snug" style={{ color: 'var(--c-text)' }}>
+          <span className="font-bold" style={{ color: 'var(--c-primary)' }}>№{row.seq}</span> {row.topic}
+        </div>
+        {row.section && (
+          <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-text-faint)' }}>{row.section}</div>
+        )}
+      </div>
+    </button>
+  ));
 
   return (
     <>
       <div className="text-[10px] font-bold uppercase tracking-widest px-1 pt-1" style={{ color: 'var(--c-muted)' }}>
-        {subjects.length} {subjects.length === 1 ? 'дисциплина' : subjects.length < 5 ? 'дисциплины' : 'дисциплин'}
+        {disciplines.length} {disciplines.length === 1 ? 'дисциплина' : disciplines.length < 5 ? 'дисциплины' : 'дисциплин'}
       </div>
 
       <div className="space-y-2">
-        {subjects.map(subj => {
-          const isOpen = expanded === subj.discipline;
-          const total = subj.lectures.length + subj.practice.length;
+        {disciplines.map(d => {
+          const isOpen = expanded === d.umkdId;
+          const plan = topicPlans[d.umkdId];
           return (
             <div
-              key={subj.discipline}
+              key={d.umkdId}
               className="rounded-[16px] overflow-hidden"
               style={{ border: '1px solid var(--c-border)' }}
             >
               <button
                 type="button"
-                onClick={() => setExpanded(isOpen ? null : subj.discipline)}
+                onClick={() => toggleDiscipline(d)}
                 className="w-full flex items-center gap-3 px-3.5 py-3 text-left"
                 style={{ background: 'var(--c-card)' }}
               >
@@ -123,66 +167,37 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
                 >
                   <BookOpen className="w-4 h-4" />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[13.5px] font-bold leading-snug" style={{ color: 'var(--c-text)' }}>
-                    {subj.discipline}
-                  </div>
-                  <div className="text-[11px] mt-0.5" style={{ color: 'var(--c-muted)' }}>
-                    {total} {total === 1 ? 'тема' : total < 5 ? 'темы' : 'тем'}
-                  </div>
+                <div className="flex-1 min-w-0 text-[13.5px] font-bold leading-snug" style={{ color: 'var(--c-text)' }}>
+                  {d.discipline}
                 </div>
                 {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
 
               {isOpen && (
-                <div className="divide-y" style={{ borderTop: '1px solid var(--c-border)', borderColor: 'var(--c-border)' }}>
-                  {subj.lectures.length > 0 && (
-                    <div className="px-3.5 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--c-muted)' }}>
-                      Лекции
+                <div style={{ borderTop: '1px solid var(--c-border)' }}>
+                  {(plan === undefined || plan === 'loading') && (
+                    <div className="flex items-center justify-center gap-2 py-6 text-[12.5px]" style={{ color: 'var(--c-muted)' }}>
+                      <Loader2 className="w-4 h-4 animate-spin" /> Загружаем темы...
                     </div>
                   )}
-                  {subj.lectures.map(row => (
-                    <button
-                      key={`l-${row.tlId}`}
-                      type="button"
-                      onClick={() => openMethodichka(row.tlId)}
-                      className="w-full flex items-start gap-2.5 px-3.5 py-2.5 text-left active:scale-[0.99] transition-transform"
-                    >
-                      <FileText className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: 'var(--c-primary)' }} />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[12.5px] leading-snug" style={{ color: 'var(--c-text)' }}>
-                          <span className="font-bold" style={{ color: 'var(--c-primary)' }}>№{row.seq}</span> {row.topic}
-                        </div>
-                        {row.section && (
-                          <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-text-faint)' }}>{row.section}</div>
-                        )}
-                      </div>
-                    </button>
-                  ))}
-
-                  {subj.practice.length > 0 && (
-                    <div className="px-3.5 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--c-muted)' }}>
-                      Практика
+                  {plan !== undefined && plan !== 'loading' && 'error' in plan && (
+                    <p className="text-[12px] text-center py-4 px-4" style={{ color: 'var(--c-muted)' }}>{plan.error}</p>
+                  )}
+                  {plan !== undefined && plan !== 'loading' && !('error' in plan) && (
+                    <div className="divide-y" style={{ borderColor: 'var(--c-border)' }}>
+                      {plan.lectures.length === 0 && plan.practice.length === 0 && (
+                        <p className="text-[12px] text-center py-4" style={{ color: 'var(--c-muted)' }}>Тем не найдено.</p>
+                      )}
+                      {plan.lectures.length > 0 && (
+                        <div className="px-3.5 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--c-muted)' }}>Лекции</div>
+                      )}
+                      {renderTopicRows(plan.lectures, 'l')}
+                      {plan.practice.length > 0 && (
+                        <div className="px-3.5 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--c-muted)' }}>Практика</div>
+                      )}
+                      {renderTopicRows(plan.practice, 'p')}
                     </div>
                   )}
-                  {subj.practice.map(row => (
-                    <button
-                      key={`p-${row.tlId}`}
-                      type="button"
-                      onClick={() => openMethodichka(row.tlId)}
-                      className="w-full flex items-start gap-2.5 px-3.5 py-2.5 text-left active:scale-[0.99] transition-transform"
-                    >
-                      <FileText className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: 'var(--c-primary)' }} />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[12.5px] leading-snug" style={{ color: 'var(--c-text)' }}>
-                          <span className="font-bold" style={{ color: 'var(--c-primary)' }}>№{row.seq}</span> {row.topic}
-                        </div>
-                        {row.section && (
-                          <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-text-faint)' }}>{row.section}</div>
-                        )}
-                      </div>
-                    </button>
-                  ))}
                 </div>
               )}
             </div>

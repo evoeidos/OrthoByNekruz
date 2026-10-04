@@ -8,6 +8,7 @@ import {
   fetchUniversityMethodichka,
   fetchUniversityProfile,
   fetchUniversitySchedule,
+  fetchUniversityTopicPlan,
 } from '@/lib/universityParser';
 import { isKrasgmuAuthError } from '@/lib/krasgmu/errors';
 import { createRedisFromEnv } from '@/lib/redis';
@@ -77,6 +78,12 @@ export async function POST(req: Request) {
     }
     if (act === 'library') {
       const data = await fetchUniversityLibrary(redis, identity.tgId);
+      return NextResponse.json({ success: true, ...data });
+    }
+    if (act === 'library_topics') {
+      const umkdId = String(body.umkdId || '').trim();
+      if (!/^\d+$/.test(umkdId)) return NextResponse.json({ error: 'umkdId is required' }, { status: 400 });
+      const data = await fetchUniversityTopicPlan(redis, identity.tgId, umkdId);
       return NextResponse.json({ success: true, ...data });
     }
     if (act === 'methodichka') {
