@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { BookOpen, ChevronDown, ChevronUp, FileText, Loader2 } from 'lucide-react';
 import type { UniData } from '@/lib/uniHelpers';
-import { getTelegramAuth } from '@/lib/uniHelpers';
+import { findActiveCycle, getTelegramAuth, krasnoyarskNow } from '@/lib/uniHelpers';
 import type { UniversityLibraryDiscipline, UniversityMethodichka, UniversityTopicPlan } from '@/lib/universityParser';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { UniLockedCard } from './UniLockedCard';
@@ -31,6 +31,24 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
 
   const [openTlId, setOpenTlId] = useState<string | null>(null);
   const [methodichkas, setMethodichkas] = useState<Record<string, MethodichkaState>>({});
+
+  const activeNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const day of uni.schedule) {
+      for (const lesson of day.lessons) {
+        if (lesson.subject !== 'ПРАКТИКА') names.add(lesson.subject.trim());
+      }
+    }
+    const cycle = findActiveCycle(uni.cycles, krasnoyarskNow().date);
+    if (cycle) names.add(cycle.discipline);
+    return names;
+  }, [uni.schedule, uni.cycles]);
+
+  const sortedDisciplines = useMemo(() => {
+    if (!Array.isArray(disciplines)) return [];
+    const isActive = (d: UniversityLibraryDiscipline) => activeNames.has(d.discipline);
+    return [...disciplines.filter(isActive), ...disciplines.filter(d => !isActive(d))];
+  }, [disciplines, activeNames]);
 
   useEffect(() => {
     if (!uni.bound || uni.checking || disciplines !== 'idle') return;
@@ -146,9 +164,10 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
       </div>
 
       <div className="space-y-2">
-        {disciplines.map(d => {
+        {sortedDisciplines.map(d => {
           const isOpen = expanded === d.umkdId;
           const plan = topicPlans[d.umkdId];
+          const isActive = activeNames.has(d.discipline);
           return (
             <div
               key={d.umkdId}
@@ -167,8 +186,18 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
                 >
                   <BookOpen className="w-4 h-4" />
                 </div>
-                <div className="flex-1 min-w-0 text-[13.5px] font-bold leading-snug" style={{ color: 'var(--c-text)' }}>
-                  {d.discipline}
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13.5px] font-bold leading-snug" style={{ color: 'var(--c-text)' }}>
+                    {d.discipline}
+                  </div>
+                  {isActive && (
+                    <span
+                      className="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full mt-1"
+                      style={{ background: 'var(--c-primary-soft)', color: 'var(--c-primary-strong)' }}
+                    >
+                      В расписании
+                    </span>
+                  )}
                 </div>
                 {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
