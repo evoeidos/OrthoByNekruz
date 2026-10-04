@@ -35,7 +35,7 @@ export type { KrasgmuLibrarySubject as UniversityLibrarySubject };
 
 const SCHEDULE_PATH = '/index.php?page%5Borg%5D=dean&cat=schedule';
 const GRADES_PATH = '/index.php?page%5Borg%5D=dean&cat=progress';
-const CACHE_TTL_SEC = 300;
+const CACHE_TTL_SEC = 60 * 60;
 // Методичка — общий для всех студентов справочный материал по теме, не меняется день ото дня.
 const METHODICHKA_TTL_SEC = 60 * 60 * 24 * 7;
 const SCHEDULE_TTL_SEC = 60 * 60 * 24 * 7;
