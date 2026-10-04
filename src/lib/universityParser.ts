@@ -45,7 +45,7 @@ const SCHEDULE_TTL_SEC = 60 * 60 * 24 * 7;
 // Каталог тем (без текста методичек) стабилен в рамках семестра — не гонять десятки запросов к сайту универа на каждое открытие.
 const LIBRARY_TTL_SEC = 60 * 60 * 24 * 7;
 
-function cacheKey(tgId: string, kind: 'schedule' | 'grades' | 'profile' | 'topics' | 'library') {
+function cacheKey(tgId: string, kind: 'schedule' | 'grades' | 'profile' | 'topics' | 'disciplines') {
   return `krasgmu_cache:${kind}:${tgId}`;
 }
 
@@ -64,7 +64,7 @@ export async function clearUniversityCache(redis: AppRedis, tgId: string): Promi
     cacheKey(tgId, 'grades'),
     cacheKey(tgId, 'profile'),
     cacheKey(tgId, 'topics'),
-    cacheKey(tgId, 'library'),
+    cacheKey(tgId, 'disciplines'),
   );
 }
 
@@ -164,12 +164,12 @@ export async function fetchUniversityLibrary(
   tgId: string,
 ): Promise<{ login: string; disciplines: KrasgmuLibraryDiscipline[] }> {
   const cached = await redis.get<{ login: string; disciplines: KrasgmuLibraryDiscipline[] }>(
-    cacheKey(tgId, 'library'),
+    cacheKey(tgId, 'disciplines'),
   );
   if (cached) return cached;
 
   const data = await fetchKrasgmuLibraryDisciplines(redis, tgId);
-  await redis.set(cacheKey(tgId, 'library'), data, { ex: LIBRARY_TTL_SEC });
+  await redis.set(cacheKey(tgId, 'disciplines'), data, { ex: LIBRARY_TTL_SEC });
   return data;
 }
 
