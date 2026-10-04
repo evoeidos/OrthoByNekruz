@@ -74,6 +74,13 @@ export type KrasgmuTopicPlanRow = {
   hours: string;
 };
 
+/** Полный тематический план одной дисциплины — для библиотеки методичек (не привязан к расписанию). */
+export type KrasgmuLibrarySubject = {
+  discipline: string;
+  lectures: KrasgmuTopicPlanRow[];
+  practice: KrasgmuTopicPlanRow[];
+};
+
 export type KrasgmuMethodichkaChapter = {
   title: string;
   paragraphs: string[];

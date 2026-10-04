@@ -4,6 +4,7 @@ import {
   clearUniversityCache,
   fetchUniversityGrades,
   fetchUniversityLectureTopics,
+  fetchUniversityLibrary,
   fetchUniversityMethodichka,
   fetchUniversityProfile,
   fetchUniversitySchedule,
@@ -72,6 +73,10 @@ export async function POST(req: Request) {
     }
     if (act === 'topics') {
       const data = await fetchUniversityLectureTopics(redis, identity.tgId);
+      return NextResponse.json({ success: true, ...data });
+    }
+    if (act === 'library') {
+      const data = await fetchUniversityLibrary(redis, identity.tgId);
       return NextResponse.json({ success: true, ...data });
     }
     if (act === 'methodichka') {

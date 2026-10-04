@@ -26,13 +26,15 @@ import {
 import { restartCoachTour } from '@/lib/coachTour';
 import { UniScheduleTab } from './UniScheduleTab';
 import { UniGradesTab } from './UniGradesTab';
+import { UniLibraryTab } from './UniLibraryTab';
 import { EMPTY_UNI, type UniData } from '@/lib/uniHelpers';
 
-type TabId = 'progress' | 'schedule' | 'grades' | 'more';
+type TabId = 'progress' | 'schedule' | 'grades' | 'library' | 'more';
 const TABS: { id: TabId; label: string }[] = [
   { id: 'progress', label: 'Прогресс' },
   { id: 'schedule', label: 'Расписание' },
   { id: 'grades',   label: 'Оценки' },
+  { id: 'library',  label: 'Методички' },
   { id: 'more',     label: 'Ещё' },
 ];
 
@@ -541,13 +543,13 @@ export const StatsTab: React.FC<StatsTabProps> = ({
               )}
             </div>
 
-            <div className="grid grid-cols-4 gap-[3px] p-1 rounded-[14px]"
+            <div className="grid grid-cols-5 gap-[3px] p-1 rounded-[14px]"
               style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}>
               {TABS.map(t => {
                 const active = tab === t.id;
                 return (
                   <button key={t.id} type="button" onClick={() => setTab(t.id)}
-                    className="h-[34px] rounded-[10px] text-[12px] font-bold transition-all duration-150 active:scale-95"
+                    className="h-[34px] px-0.5 rounded-[10px] text-[11px] leading-[1.1] font-bold truncate transition-all duration-150 active:scale-95"
                     style={active
                       ? { background: 'var(--c-primary)', color: 'var(--c-bg)' }
                       : { background: 'transparent', color: 'var(--c-text)' }}>
@@ -559,6 +561,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
 
             {tab === 'schedule' && <UniScheduleTab uni={uni} onBind={() => setTab('more')} />}
             {tab === 'grades'   && <UniGradesTab   uni={uni} onBind={() => setTab('more')} />}
+            {tab === 'library'  && <UniLibraryTab  uni={uni} onBind={() => setTab('more')} />}
 
 
             {tab === 'progress' && (<>

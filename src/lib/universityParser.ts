@@ -8,6 +8,7 @@ import { parseGradesHtml, parseProfileHtml, parseScheduleHtml } from '@/lib/kras
 import {
   fetchKrasgmuGrades,
   fetchKrasgmuLectureTopics,
+  fetchKrasgmuLibrary,
   fetchKrasgmuMethodichka,
   fetchKrasgmuProfile,
   fetchKrasgmuSchedule,
@@ -16,6 +17,7 @@ import type { MatchedTopic } from '@/lib/krasgmu/topicMatch';
 import type {
   KrasgmuCycle,
   KrasgmuGradeRow,
+  KrasgmuLibrarySubject,
   KrasgmuMethodichka,
   KrasgmuProfile,
   KrasgmuScheduleDay,
@@ -29,14 +31,18 @@ export type { KrasgmuProfile as UniversityProfile };
 export type { MatchedTopic as UniversityMatchedTopic };
 export type { KrasgmuCycle as UniversityCycle };
 export type { KrasgmuMethodichka as UniversityMethodichka };
+export type { KrasgmuLibrarySubject as UniversityLibrarySubject };
 
 const SCHEDULE_PATH = '/index.php?page%5Borg%5D=dean&cat=schedule';
 const GRADES_PATH = '/index.php?page%5Borg%5D=dean&cat=progress';
 const CACHE_TTL_SEC = 300;
 // Методичка — общий для всех студентов справочный материал по теме, не меняется день ото дня.
 const METHODICHKA_TTL_SEC = 60 * 60 * 24 * 7;
+const SCHEDULE_TTL_SEC = 60 * 60 * 24 * 7;
+// Каталог тем (без текста методичек) стабилен в рамках семестра — не гонять десятки запросов к сайту универа на каждое открытие.
+const LIBRARY_TTL_SEC = 60 * 60 * 24 * 7;
 
-function cacheKey(tgId: string, kind: 'schedule' | 'grades' | 'profile' | 'topics') {
+function cacheKey(tgId: string, kind: 'schedule' | 'grades' | 'profile' | 'topics' | 'library') {
   return `krasgmu_cache:${kind}:${tgId}`;
 }
 
@@ -55,6 +61,7 @@ export async function clearUniversityCache(redis: AppRedis, tgId: string): Promi
     cacheKey(tgId, 'grades'),
     cacheKey(tgId, 'profile'),
     cacheKey(tgId, 'topics'),
+    cacheKey(tgId, 'library'),
   );
 }
 
@@ -92,7 +99,7 @@ export async function fetchUniversitySchedule(
   if (cached) return { ...cached, cycles: cached.cycles ?? [] };
 
   const data = await fetchKrasgmuSchedule(redis, tgId);
-  await redis.set(cacheKey(tgId, 'schedule'), data, { ex: CACHE_TTL_SEC });
+  await redis.set(cacheKey(tgId, 'schedule'), data, { ex: SCHEDULE_TTL_SEC });
   return data;
 }
 
@@ -145,6 +152,21 @@ export async function fetchUniversityLectureTopics(
 
   const data = await fetchKrasgmuLectureTopics(redis, tgId);
   await redis.set(cacheKey(tgId, 'topics'), data, { ex: CACHE_TTL_SEC });
+  return data;
+}
+
+/** Полный каталог тем (лекции + практики) всех дисциплин студента, без фильтра по расписанию — для библиотеки методичек. */
+export async function fetchUniversityLibrary(
+  redis: AppRedis,
+  tgId: string,
+): Promise<{ login: string; subjects: KrasgmuLibrarySubject[] }> {
+  const cached = await redis.get<{ login: string; subjects: KrasgmuLibrarySubject[] }>(
+    cacheKey(tgId, 'library'),
+  );
+  if (cached) return cached;
+
+  const data = await fetchKrasgmuLibrary(redis, tgId);
+  await redis.set(cacheKey(tgId, 'library'), data, { ex: LIBRARY_TTL_SEC });
   return data;
 }
 

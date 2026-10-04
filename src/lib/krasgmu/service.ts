@@ -33,6 +33,7 @@ import {
 import type {
   KrasgmuCycle,
   KrasgmuGradeRow,
+  KrasgmuLibrarySubject,
   KrasgmuMethodichka,
   KrasgmuProfile,
   KrasgmuScheduleDay,
@@ -218,4 +219,41 @@ export async function fetchKrasgmuLectureTopics(
   }
 
   return { login, topics, practiceTopics };
+}
+
+/**
+ * Полный тематический план всех дисциплин студента — в отличие от
+ * fetchKrasgmuLectureTopics не фильтрует по расписанию: отдаёт все темы
+ * (лекции + практики) каждой дисциплины, чтобы открыть методичку по любой
+ * из них, а не только по той, что стоит в ближайших парах.
+ * Дисциплины обходятся последовательно (не Promise.all), чтобы не бить
+ * по сайту универа десятками параллельных запросов разом.
+ */
+export async function fetchKrasgmuLibrary(
+  redis: AppRedis,
+  tgId: string,
+): Promise<{ login: string; subjects: KrasgmuLibrarySubject[] }> {
+  const { cookies, login } = await ensureKrasgmuSession(redis, tgId);
+
+  const umkdListHtml = await fetchKrasgmuPage(umkdListPath(login), cookies);
+  const umkdList = parseUmkdListHtml(umkdListHtml);
+
+  const umkdIdBySubject = new Map<string, string>();
+  for (const entry of umkdList) {
+    if (!umkdIdBySubject.has(entry.discipline)) umkdIdBySubject.set(entry.discipline, entry.umkdId);
+  }
+
+  const subjects: KrasgmuLibrarySubject[] = [];
+  for (const [discipline, umkdId] of umkdIdBySubject) {
+    const [lecturesHtml, practiceHtml] = await Promise.all([
+      fetchKrasgmuPage(topicPlanPath(umkdId, 0), cookies),
+      fetchKrasgmuPage(topicPlanPath(umkdId, 1), cookies),
+    ]);
+    const lectures = parseTopicPlanHtml(lecturesHtml);
+    const practice = parseTopicPlanHtml(practiceHtml);
+    if (lectures.length === 0 && practice.length === 0) continue;
+    subjects.push({ discipline, lectures, practice });
+  }
+
+  return { login, subjects };
 }
