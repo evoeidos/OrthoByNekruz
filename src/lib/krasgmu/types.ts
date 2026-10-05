@@ -18,6 +18,8 @@ export type KrasgmuScheduleLesson = {
   teacher: string;
   /** Конкретные календарные даты повторения (сайт отдаёт недельный шаблон + список дат) */
   dates?: string;
+  /** Ссылка на дистанционное занятие (например, видеоконференция) */
+  link?: string;
 };
 
 export type KrasgmuScheduleDay = {

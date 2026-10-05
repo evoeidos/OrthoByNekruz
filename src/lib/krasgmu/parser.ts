@@ -91,6 +91,8 @@ export function parseScheduleHtml(html: string): KrasgmuScheduleDay[] {
       contentCell.find('span.green, span[style*="green"]').first().text(),
     );
     const dates = cleanText(contentCell.find('.scheduletime').first().text());
+    const rawLink = contentCell.find('a[href]').first().attr('href') ?? '';
+    const link = /^https:\/\//i.test(rawLink) ? rawLink : undefined;
 
     const subject = cleanText(
       contentCell
@@ -108,6 +110,7 @@ export function parseScheduleHtml(html: string): KrasgmuScheduleDay[] {
       room,
       teacher: '',
       dates: dates || undefined,
+      link,
     });
   });
 

@@ -42,6 +42,7 @@ const CACHE_TTL_SEC = 60 * 60;
 // Методичка — общий для всех студентов справочный материал по теме, не меняется день ото дня.
 const METHODICHKA_TTL_SEC = 60 * 60 * 24 * 7;
 const SCHEDULE_TTL_SEC = 60 * 60 * 24 * 7;
+const LIVE_LINK_SCHEDULE_TTL_SEC = 60 * 5;
 // Каталог тем (без текста методичек) стабилен в рамках семестра — не гонять десятки запросов к сайту универа на каждое открытие.
 const LIBRARY_TTL_SEC = 60 * 60 * 24 * 7;
 
@@ -102,7 +103,9 @@ export async function fetchUniversitySchedule(
   if (cached) return { ...cached, cycles: cached.cycles ?? [] };
 
   const data = await fetchKrasgmuSchedule(redis, tgId);
-  await redis.set(cacheKey(tgId, 'schedule'), data, { ex: SCHEDULE_TTL_SEC });
+  // Ссылка на дистанционное занятие появляется в день занятия — короткий кэш, чтобы она не ждала неделю.
+  const hasLiveLink = data.schedule.some(d => d.lessons.some(l => l.link));
+  await redis.set(cacheKey(tgId, 'schedule'), data, { ex: hasLiveLink ? LIVE_LINK_SCHEDULE_TTL_SEC : SCHEDULE_TTL_SEC });
   return data;
 }
 

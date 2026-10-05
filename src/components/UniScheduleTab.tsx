@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, FileText, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileText, Loader2, Video } from 'lucide-react';
 import type { UniData } from '@/lib/uniHelpers';
 import {
   krasnoyarskNow, currentWeekDays, parseTimeRange, datesIncludeToday, findMatchingDateEntry, findActiveCycle,
@@ -210,6 +210,17 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
               >
                 <FileText className="w-3 h-3" /> Методичка
               </button>
+            )}
+            {item.l.link && (
+              <a
+                href={item.l.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="self-start inline-flex items-center gap-1 text-[11px] font-semibold mt-1.5"
+                style={{ color: 'var(--c-primary)' }}
+              >
+                <Video className="w-3 h-3" /> Подключиться к занятию
+              </a>
             )}
             {item.meta && <div className="text-[12px] mt-0.5" style={{ color: 'var(--c-muted)' }}>{item.meta}</div>}
             {item.l.dates && <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-text-faint)' }}>{item.l.dates}</div>}
