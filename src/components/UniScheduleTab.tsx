@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, FileText, Loader2, Video } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FileText, Loader2, Video } from 'lucide-react';
 import type { UniData } from '@/lib/uniHelpers';
 import {
   krasnoyarskNow, currentWeekDays, parseTimeRange, datesIncludeToday, findMatchingDateEntry, findActiveCycle,
@@ -10,6 +10,10 @@ import {
 import type { UniversityMethodichka } from '@/lib/universityParser';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { UniLockedCard } from './UniLockedCard';
+
+function sameDay(a: Date, b: Date): boolean {
+  return a.getUTCFullYear() === b.getUTCFullYear() && a.getUTCMonth() === b.getUTCMonth() && a.getUTCDate() === b.getUTCDate();
+}
 
 /** Время по Красноярску, обновляется каждые 30 с. */
 function useKrskNow() {
@@ -27,7 +31,8 @@ type MethodichkaState = 'loading' | UniversityMethodichka | { error: string };
 
 export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ uni, onBind }) => {
   const now = useKrskNow();
-  const week = useMemo(() => currentWeekDays(), [now.weekdayIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [weekOffset, setWeekOffset] = useState(0);
+  const week = useMemo(() => currentWeekDays(weekOffset), [now.weekdayIdx, weekOffset]); // eslint-disable-line react-hooks/exhaustive-deps
   const [picked, setPicked] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   useEffect(() => { setExpanded({}); }, [picked]);
@@ -73,12 +78,16 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
   }
 
   const selected = picked ?? now.weekday;
-  const isToday = selected === now.weekday;
+  const selDate = week.find(w => w.weekday === selected);
+  const isToday = !!selDate && sameDay(selDate.date, now.date);
   const day = uni.schedule.find(d => d.weekday === selected);
-  const lessons = day?.lessons ?? [];
+  // Расписание хранится шаблоном по дням недели с перечнем конкретных дат —
+  // показываем только те пары, которые реально идут в выбранную дату.
+  const lessons = (day?.lessons ?? []).filter(l =>
+    !selDate || datesIncludeToday(l.dates, { day: selDate.num, month: selDate.month }),
+  );
 
   const today = { day: now.date.getUTCDate(), month: now.date.getUTCMonth() };
-  const selDate = week.find(w => w.weekday === selected);
   // «ПРАКТИКА» в недельной сетке — заглушка: реальная дисциплина зависит от того,
   // в диапазон дат какого цикла (циклового расписания) попадает просматриваемый день.
   const activeCycle = selDate ? findActiveCycle(uni.cycles, selDate.date) : null;
@@ -114,11 +123,32 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
 
   return (
     <>
+      <div className="flex items-center justify-between px-1">
+        <button type="button" onClick={() => setWeekOffset(o => o - 1)} aria-label="Предыдущая неделя"
+          className="w-8 h-8 rounded-full flex items-center justify-center active:scale-95" style={{ color: 'var(--c-primary)' }}>
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <div className="flex items-center gap-2 text-[12px] font-semibold" style={{ color: 'var(--c-text)' }}>
+          {week[0].num} {MONTHS_GEN[week[0].month]} – {week[week.length - 1].num} {MONTHS_GEN[week[week.length - 1].month]}
+          {weekOffset !== 0 && (
+            <button type="button" onClick={() => setWeekOffset(0)} className="text-[11px] font-bold px-2 py-0.5 rounded-full"
+              style={{ background: 'var(--c-primary-soft)', color: 'var(--c-primary-strong)' }}>
+              Сегодня
+            </button>
+          )}
+        </div>
+        <button type="button" onClick={() => setWeekOffset(o => o + 1)} aria-label="Следующая неделя"
+          className="w-8 h-8 rounded-full flex items-center justify-center active:scale-95" style={{ color: 'var(--c-primary)' }}>
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+
       <div className="grid grid-cols-6 gap-1">
         {week.map(w => {
           const active = w.weekday === selected;
-          const today = w.weekday === now.weekday;
-          const has = uni.schedule.find(d => d.weekday === w.weekday)?.lessons.length;
+          const today = sameDay(w.date, now.date);
+          const has = (uni.schedule.find(d => d.weekday === w.weekday)?.lessons ?? [])
+            .filter(l => datesIncludeToday(l.dates, { day: w.num, month: w.month })).length;
           return (
             <button
               key={w.weekday}

@@ -55,12 +55,12 @@ export function krasnoyarskNow() {
   };
 }
 
-/** Дата Пн–Сб текущей недели (по Красноярску). month — 0-based, свой для каждого дня (неделя может пересекать границу месяца). */
-export function currentWeekDays() {
+/** Дата Пн–Сб недели (по Красноярску), сдвинутой на weekOffset недель. month — 0-based, свой для каждого дня (неделя может пересекать границу месяца). */
+export function currentWeekDays(weekOffset = 0) {
   const { date, weekdayIdx } = krasnoyarskNow();
   const dow = (weekdayIdx + 6) % 7; // 0 = Пн
   return [1, 2, 3, 4, 5, 6].map((wd, i) => {
-    const d = new Date(date.getTime() + (i - dow) * 86400000);
+    const d = new Date(date.getTime() + (i - dow + weekOffset * 7) * 86400000);
     return { weekday: WEEKDAYS_RU[wd], short: WEEKDAYS_SHORT[wd], num: d.getUTCDate(), month: d.getUTCMonth(), date: d };
   });
 }
