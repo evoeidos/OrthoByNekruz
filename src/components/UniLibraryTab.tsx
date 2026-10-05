@@ -217,14 +217,14 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
                       {plan.lectures.length === 0 && plan.practice.length === 0 && (
                         <p className="text-[12px] text-center py-4" style={{ color: 'var(--c-muted)' }}>Тем не найдено.</p>
                       )}
-                      {plan.lectures.length > 0 && (
-                        <div className="px-3.5 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--c-muted)' }}>Лекции</div>
-                      )}
-                      {renderTopicRows(plan.lectures, 'l')}
                       {plan.practice.length > 0 && (
                         <div className="px-3.5 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--c-muted)' }}>Практика</div>
                       )}
                       {renderTopicRows(plan.practice, 'p')}
+                      {plan.lectures.length > 0 && (
+                        <div className="px-3.5 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--c-muted)' }}>Лекции</div>
+                      )}
+                      {renderTopicRows(plan.lectures, 'l')}
                     </div>
                   )}
                 </div>
