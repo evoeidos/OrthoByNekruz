@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { friendlyAiError, generateQuestionAiAnswer } from '@/lib/questionAi';
-import { buildMethodichkaPrompts } from '@/lib/methodichkaAi';
+import { METHODICHKA_PROMPT_VERSION, buildMethodichkaPrompts } from '@/lib/methodichkaAi';
 import { verifyApiStudyUser } from '@/lib/apiUserAuth';
 import { createRedisFromEnv } from '@/lib/redis';
 import { checkAiRateLimit } from '@/lib/aiRateLimit';
 import { fetchUniversityMethodichka } from '@/lib/universityParser';
 
 const redis = createRedisFromEnv();
+const AI_CACHE_TTL_SEC = 60 * 60 * 24 * 30;
 
 export async function POST(req: Request) {
   let body: { tlId?: string; initData?: string; telegramId?: string };
@@ -23,17 +24,25 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
+  const tlId = String(body.tlId || '').trim();
+  if (!/^\d+$/.test(tlId)) {
+    return NextResponse.json({ error: 'Нет данных методички' }, { status: 400 });
+  }
+
+  // Методичка общая для всех студентов, поэтому конспект кэшируется по tlId.
+  // Попадание в кэш не тратит ни токены, ни лимит запросов.
+  const cacheKey = `ai:methodichka:${METHODICHKA_PROMPT_VERSION}:${tlId}`;
+  const cached = await redis.get<string>(cacheKey);
+  if (cached) {
+    return NextResponse.json({ result: cached });
+  }
+
   const limit = await checkAiRateLimit(redis, auth.tgId);
   if (!limit.allowed) {
     return NextResponse.json(
       { error: limit.error },
       { status: 429, headers: { 'Retry-After': String(limit.retryAfterSec) } },
     );
-  }
-
-  const tlId = String(body.tlId || '').trim();
-  if (!/^\d+$/.test(tlId)) {
-    return NextResponse.json({ error: 'Нет данных методички' }, { status: 400 });
   }
 
   try {
@@ -45,6 +54,7 @@ export async function POST(req: Request) {
     const { systemInstruction, userPrompt } = buildMethodichkaPrompts(methodichka);
     const out = await generateQuestionAiAnswer(systemInstruction, userPrompt);
     if (out.result) {
+      await redis.set(cacheKey, out.result, { ex: AI_CACHE_TTL_SEC });
       return NextResponse.json({ result: out.result });
     }
     return NextResponse.json(
