@@ -10,7 +10,7 @@ const redis = createRedisFromEnv();
 const AI_CACHE_TTL_SEC = 60 * 60 * 24 * 30;
 
 export async function POST(req: Request) {
-  let body: { tlId?: string; initData?: string; telegramId?: string };
+  let body: { tlId?: string; initData?: string; telegramId?: string; discipline?: string; topic?: string };
   try {
     body = await req.json();
   } catch {
@@ -35,8 +35,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Методичка не найдена' }, { status: 404 });
     }
 
+    const context = { discipline: body.discipline, topic: body.topic };
+
     // Попадание в кэш не тратит ни токены, ни лимит запросов.
-    const cacheKey = methodichkaCacheKey(tlId, methodichka);
+    const cacheKey = methodichkaCacheKey(tlId, methodichka, context);
     const cached = await redis.get<string>(cacheKey);
     if (cached) {
       return NextResponse.json({ result: cached });
@@ -50,7 +52,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { systemInstruction, userPrompt } = buildMethodichkaPrompts(methodichka);
+    const { systemInstruction, userPrompt } = buildMethodichkaPrompts(methodichka, context);
     const out = await generateQuestionAiAnswer(systemInstruction, userPrompt);
     if (out.result) {
       await redis.set(cacheKey, out.result, { ex: AI_CACHE_TTL_SEC });

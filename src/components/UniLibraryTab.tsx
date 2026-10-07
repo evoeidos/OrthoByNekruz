@@ -29,6 +29,7 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
   const [topicPlans, setTopicPlans] = useState<Record<string, TopicPlanState>>({});
 
   const [openTlId, setOpenTlId] = useState<string | null>(null);
+  const [openContext, setOpenContext] = useState<{ discipline: string; topic: string } | null>(null);
   const [methodichkas, setMethodichkas] = useState<Record<string, MethodichkaState>>({});
 
   const activeNames = useMemo(() => {
@@ -91,8 +92,9 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
     })();
   };
 
-  const openMethodichka = (tlId: string) => {
+  const openMethodichka = (tlId: string, discipline: string, topic: string) => {
     setOpenTlId(tlId);
+    setOpenContext({ discipline, topic });
     if (methodichkas[tlId] !== undefined) return;
     setMethodichkas(m => ({ ...m, [tlId]: 'loading' }));
     (async () => {
@@ -137,11 +139,11 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
     );
   }
 
-  const renderTopicRows = (rows: UniversityTopicPlan['lectures'], kind: 'l' | 'p') => rows.map(row => (
+  const renderTopicRows = (rows: UniversityTopicPlan['lectures'], kind: 'l' | 'p', discipline: string) => rows.map(row => (
     <button
       key={`${kind}-${row.tlId}`}
       type="button"
-      onClick={() => openMethodichka(row.tlId)}
+      onClick={() => openMethodichka(row.tlId, discipline, row.topic)}
       className="w-full flex items-start gap-2.5 px-3.5 py-2.5 text-left active:scale-[0.99] transition-transform"
     >
       <FileText className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: 'var(--c-primary)' }} />
@@ -219,11 +221,11 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
                       {plan.practice.length > 0 && (
                         <div className="px-3.5 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--c-muted)' }}>Практика</div>
                       )}
-                      {renderTopicRows(plan.practice, 'p')}
+                      {renderTopicRows(plan.practice, 'p', d.discipline)}
                       {plan.lectures.length > 0 && (
                         <div className="px-3.5 py-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--c-muted)' }}>Лекции</div>
                       )}
-                      {renderTopicRows(plan.lectures, 'l')}
+                      {renderTopicRows(plan.lectures, 'l', d.discipline)}
                     </div>
                   )}
                 </div>
@@ -233,7 +235,7 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
         })}
       </div>
 
-      <MethodichkaDialog tlId={openTlId} state={openTlId ? methodichkas[openTlId] : undefined} onClose={() => setOpenTlId(null)} />
+      <MethodichkaDialog tlId={openTlId} state={openTlId ? methodichkas[openTlId] : undefined} context={openContext} onClose={() => setOpenTlId(null)} />
     </>
   );
 };

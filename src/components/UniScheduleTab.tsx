@@ -36,10 +36,12 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
   useEffect(() => { setExpanded({}); }, [picked]);
 
   const [openTlId, setOpenTlId] = useState<string | null>(null);
+  const [openContext, setOpenContext] = useState<{ discipline: string; topic: string } | null>(null);
   const [methodichkas, setMethodichkas] = useState<Record<string, MethodichkaState>>({});
 
-  const openMethodichka = (tlId: string) => {
+  const openMethodichka = (tlId: string, discipline: string, topic: string) => {
     setOpenTlId(tlId);
+    setOpenContext({ discipline, topic });
     if (methodichkas[tlId] !== undefined) return;
     setMethodichkas(m => ({ ...m, [tlId]: 'loading' }));
     (async () => {
@@ -232,7 +234,7 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
             {item.topic && (
               <button
                 type="button"
-                onClick={() => openMethodichka(item.topic!.tlId)}
+                onClick={() => openMethodichka(item.topic!.tlId, item.subject, item.topic!.topic)}
                 className="self-start inline-flex items-center gap-1 text-[11px] font-semibold mt-1.5"
                 style={{ color: 'var(--c-primary)' }}
               >
@@ -327,7 +329,7 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
         });
       })()}
 
-      <MethodichkaDialog tlId={openTlId} state={openTlId ? methodichkas[openTlId] : undefined} onClose={() => setOpenTlId(null)} />
+      <MethodichkaDialog tlId={openTlId} state={openTlId ? methodichkas[openTlId] : undefined} context={openContext} onClose={() => setOpenTlId(null)} />
     </>
   );
 };

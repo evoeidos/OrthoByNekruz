@@ -62,8 +62,10 @@ function AiMarkdown({ text }: { text: string }) {
 export const MethodichkaDialog: React.FC<{
   tlId: string | null;
   state: MethodichkaState | undefined;
+  /** Дисциплина и название темы — передаются ИИ, чтобы ответ не ограничивался только текстом методички. */
+  context: { discipline: string; topic: string } | null;
   onClose: () => void;
-}> = ({ tlId, state, onClose }) => {
+}> = ({ tlId, state, context, onClose }) => {
   const [ai, setAi] = useState<AiState | null>(null);
   const aiForCurrent = ai && tlId && ai.tlId === tlId ? ai : null;
   const isReady = !!tlId && typeof state === 'object' && !('error' in state);
@@ -78,7 +80,10 @@ export const MethodichkaDialog: React.FC<{
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tlId, initData, telegramId: telegram_id }),
+          body: JSON.stringify({
+            tlId, initData, telegramId: telegram_id,
+            discipline: context?.discipline, topic: context?.topic,
+          }),
         });
         const d = await r.json();
         if (!r.ok || !d.result) {
