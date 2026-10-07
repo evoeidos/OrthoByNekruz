@@ -5,12 +5,11 @@ import { BookOpen, ChevronDown, ChevronUp, FileText, Loader2 } from 'lucide-reac
 import type { UniData } from '@/lib/uniHelpers';
 import { findActiveCycle, getTelegramAuth, krasnoyarskNow } from '@/lib/uniHelpers';
 import type { UniversityLibraryDiscipline, UniversityMethodichka, UniversityTopicPlan } from '@/lib/universityParser';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { MethodichkaDialog, type MethodichkaState } from './MethodichkaDialog';
 import { UniLockedCard } from './UniLockedCard';
 
 type DisciplinesState = 'idle' | 'loading' | { error: string } | UniversityLibraryDiscipline[];
 type TopicPlanState = 'loading' | UniversityTopicPlan | { error: string };
-type MethodichkaState = 'loading' | UniversityMethodichka | { error: string };
 
 async function postUniData(body: Record<string, unknown>): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
   const { telegram_id, initData } = getTelegramAuth();
@@ -234,57 +233,7 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
         })}
       </div>
 
-      <Dialog open={!!openTlId} onOpenChange={o => { if (!o) setOpenTlId(null); }}>
-        <DialogContent
-          className="max-w-lg w-[92vw] max-h-[85vh] overflow-y-auto rounded-3xl p-5"
-          style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}
-        >
-          {(() => {
-            const data = openTlId ? methodichkas[openTlId] : undefined;
-            if (data === 'loading' || data === undefined) {
-              return (
-                <div className="flex items-center justify-center gap-2 py-10 text-[13px]" style={{ color: 'var(--c-muted)' }}>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Загрузка методички...
-                </div>
-              );
-            }
-            if ('error' in data) {
-              return (
-                <p className="text-[13px] text-center py-10 px-4" style={{ color: 'var(--c-muted)' }}>
-                  {data.error}
-                </p>
-              );
-            }
-            return (
-              <>
-                <DialogHeader>
-                  <DialogTitle className="text-[15px] font-bold leading-snug pr-4" style={{ color: 'var(--c-text)' }}>
-                    {data.title}
-                  </DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4 mt-1">
-                  {data.chapters.map((ch, ci) => (
-                    <div key={ci}>
-                      {ch.title && (
-                        <div className="text-[11px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--c-primary)' }}>
-                          {ch.title}
-                        </div>
-                      )}
-                      <div className="space-y-1.5">
-                        {ch.paragraphs.map((p, pi) => (
-                          <p key={pi} className="text-[13px] leading-relaxed whitespace-pre-line" style={{ color: 'var(--c-text)' }}>
-                            {p}
-                          </p>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
+      <MethodichkaDialog tlId={openTlId} state={openTlId ? methodichkas[openTlId] : undefined} onClose={() => setOpenTlId(null)} />
     </>
   );
 };
