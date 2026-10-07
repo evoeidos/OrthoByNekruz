@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { friendlyAiError, generateQuestionAiAnswer } from '@/lib/questionAi';
-import { METHODICHKA_PROMPT_VERSION, buildMethodichkaPrompts } from '@/lib/methodichkaAi';
+import { buildMethodichkaPrompts, methodichkaCacheKey } from '@/lib/methodichkaAi';
 import { verifyApiStudyUser } from '@/lib/apiUserAuth';
 import { createRedisFromEnv } from '@/lib/redis';
 import { checkAiRateLimit } from '@/lib/aiRateLimit';
@@ -29,26 +29,25 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Нет данных методички' }, { status: 400 });
   }
 
-  // Методичка общая для всех студентов, поэтому конспект кэшируется по tlId.
-  // Попадание в кэш не тратит ни токены, ни лимит запросов.
-  const cacheKey = `ai:methodichka:${METHODICHKA_PROMPT_VERSION}:${tlId}`;
-  const cached = await redis.get<string>(cacheKey);
-  if (cached) {
-    return NextResponse.json({ result: cached });
-  }
-
-  const limit = await checkAiRateLimit(redis, auth.tgId);
-  if (!limit.allowed) {
-    return NextResponse.json(
-      { error: limit.error },
-      { status: 429, headers: { 'Retry-After': String(limit.retryAfterSec) } },
-    );
-  }
-
   try {
     const { methodichka } = await fetchUniversityMethodichka(redis, auth.tgId, tlId);
     if (!methodichka) {
       return NextResponse.json({ error: 'Методичка не найдена' }, { status: 404 });
+    }
+
+    // Попадание в кэш не тратит ни токены, ни лимит запросов.
+    const cacheKey = methodichkaCacheKey(tlId, methodichka);
+    const cached = await redis.get<string>(cacheKey);
+    if (cached) {
+      return NextResponse.json({ result: cached });
+    }
+
+    const limit = await checkAiRateLimit(redis, auth.tgId);
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: limit.error },
+        { status: 429, headers: { 'Retry-After': String(limit.retryAfterSec) } },
+      );
     }
 
     const { systemInstruction, userPrompt } = buildMethodichkaPrompts(methodichka);

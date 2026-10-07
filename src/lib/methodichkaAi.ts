@@ -1,6 +1,8 @@
+import { createHash } from 'crypto';
 import type { UniversityMethodichka } from '@/lib/universityParser';
 
-const MAX_TEXT_CHARS = 12_000;
+// Одним вызовом DeepSeek укладываемся в таймаут (25 с), поэтому нарезка на части не подходит.
+const MAX_TEXT_CHARS = 30_000;
 // Меняйте при изменении промпта: версия входит в ключ кэша, старые конспекты перестанут отдаваться.
 export const METHODICHKA_PROMPT_VERSION = 'v1';
 
@@ -44,4 +46,10 @@ export function buildMethodichkaPrompts(m: UniversityMethodichka) {
     systemInstruction: SYSTEM_INSTRUCTION,
     userPrompt: `Методические указания:\n\n${methodichkaToPlainText(m)}`,
   };
+}
+
+// Хэш текста в ключе: если преподаватель поправил методичку, конспект пересоздаётся.
+export function methodichkaCacheKey(tlId: string, m: UniversityMethodichka): string {
+  const hash = createHash('sha256').update(methodichkaToPlainText(m)).digest('hex').slice(0, 16);
+  return `ai:methodichka:${METHODICHKA_PROMPT_VERSION}:${tlId}:${hash}`;
 }
