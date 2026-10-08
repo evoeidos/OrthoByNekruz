@@ -104,8 +104,18 @@ export async function loginKrasgmuViaBrowser(
 
     await clickByExactText(page, 'button, a', 'Принять').catch(() => false);
 
-    const opened = await clickByExactText(page, 'a', 'Войти');
+    // DDoS-Guard иногда отдаёт промежуточную JS-проверку вместо главной страницы
+    // (чаще при повторных заходах подряд с одного IP Browserless) — она сама
+    // редиректит на реальную страницу через пару секунд. Пробуем несколько раз,
+    // прежде чем считать это сменой вёрстки сайта.
+    let opened = false;
+    for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 2500));
+      opened = await clickByExactText(page, 'a', 'Войти');
+    }
     if (!opened) {
+      const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
+      console.error('[krasgmu] "Войти" not found on home page. Body snippet:', bodyText.slice(0, 300));
       throw new KrasgmuAuthError('Не найдена кнопка входа — сайт изменил вёрстку.', 'form_changed');
     }
 
