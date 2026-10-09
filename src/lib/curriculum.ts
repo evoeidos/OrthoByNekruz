@@ -54,6 +54,17 @@ export interface LessonSection {
   atlas?: string;
 }
 
+/** Блок аннотации методички: абзац, пункт списка или таблица. */
+export type AnnotationBlock =
+  | { type: 'p' | 'li'; text: string }
+  | { type: 'table'; rows: string[][] };
+
+/** Тестовое задание из методички. Правильные ответы на сайте не отмечены. */
+export interface LessonTest {
+  question: string;
+  options: string[];
+}
+
 export interface Lesson {
   id: string;
   /** Позиция в плане курса, начиная с 1 */
@@ -77,6 +88,16 @@ export interface Lesson {
   sections?: LessonSection[];
   /** Термины занятия — если подтем нет; иначе термины лежат в подтемах */
   terms?: string[];
+  /** Аннотация методички кафедры: что разбирают на занятии */
+  annotation?: AnnotationBlock[];
+  /** Ссылки на изображения к аннотации */
+  images?: string[];
+  /** Вопросы по теме занятия из методички */
+  questions?: string[];
+  /** Тестовые задания из методички — для самопроверки */
+  tests?: LessonTest[];
+  /** Только в ответе API: у занятия есть аннотация/вопросы/тесты, текст грузится отдельно */
+  hasContent?: boolean;
   /** Для контрольной и коллоквиума: номера занятий, которые входят в блок */
   covers?: number[];
   hours?: number;
@@ -145,6 +166,41 @@ function normalizeCovers(raw: unknown): number[] | undefined {
   return out.length ? out : undefined;
 }
 
+function normalizeAnnotation(raw: unknown): AnnotationBlock[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: AnnotationBlock[] = [];
+  for (const item of raw.slice(0, 400)) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    if (r.type === 'table') {
+      const rows = Array.isArray(r.rows)
+        ? r.rows
+          .filter(Array.isArray)
+          .map(row => (row as unknown[]).map(c => String(c ?? '').trim()))
+          .filter(row => row.some(Boolean))
+        : [];
+      if (rows.length) out.push({ type: 'table', rows });
+      continue;
+    }
+    const text = String(r.text ?? '').trim();
+    if (text) out.push({ type: r.type === 'li' ? 'li' : 'p', text });
+  }
+  return out.length ? out : undefined;
+}
+
+function normalizeTests(raw: unknown): LessonTest[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: LessonTest[] = [];
+  for (const item of raw.slice(0, 200)) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    const question = String(r.question ?? '').trim();
+    const options = normalizeStringList(r.options, 12) ?? [];
+    if (question && options.length >= 2) out.push({ question, options });
+  }
+  return out.length ? out : undefined;
+}
+
 function normalizeSections(raw: unknown): LessonSection[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const out: LessonSection[] = [];
@@ -197,6 +253,10 @@ export function normalizeLesson(raw: unknown, fallbackOrder: number): Lesson | n
     summary: r.summary ? String(r.summary).trim() : undefined,
     objectives: normalizeStringList(r.objectives),
     sections: normalizeSections(r.sections),
+    annotation: normalizeAnnotation(r.annotation),
+    images: normalizeStringList(r.images, 24),
+    questions: normalizeStringList(r.questions, 200),
+    tests: normalizeTests(r.tests),
     terms: normalizeStringList(r.terms, 80),
     covers: kind === 'lesson' ? undefined : normalizeCovers(r.covers),
     hours: Number.isFinite(hours) && hours > 0 ? hours : undefined,
@@ -329,13 +389,17 @@ async function loadSuppressedIds(redis: AppRedis): Promise<Set<string>> {
   return new Set(raw.map(v => String(v)).filter(Boolean));
 }
 
-/** Планы из файлов проекта, помеченные builtIn. */
+let seedProgramsCache: Program[] | null = null;
+
+/** Планы из файлов проекта, помеченные builtIn. Файлы не меняются между деплоями — считаем один раз. */
 function seedPrograms(): Program[] {
+  if (seedProgramsCache) return seedProgramsCache;
   const out: Program[] = [];
   for (const raw of listSeedPrograms()) {
     const program = normalizeProgram(raw);
     if (program) out.push({ ...program, builtIn: true });
   }
+  seedProgramsCache = out;
   return out;
 }
 
@@ -358,7 +422,14 @@ function mergeLessonFromSeed(stored: Lesson, seed?: Lesson): Lesson {
   const sections = stored.sections?.length
     ? stored.sections.map(s => mergeSectionImages(s, seedSections.get(s.id)))
     : seed.sections;
-  return { ...stored, sections };
+  return {
+    ...stored,
+    sections,
+    annotation: stored.annotation ?? seed.annotation,
+    images: stored.images ?? seed.images,
+    questions: stored.questions ?? seed.questions,
+    tests: stored.tests ?? seed.tests,
+  };
 }
 
 /**

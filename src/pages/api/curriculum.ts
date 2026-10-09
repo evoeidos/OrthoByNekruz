@@ -36,7 +36,9 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '';
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { initData, telegramId } = req.body ?? {};
+  const { initData, telegramId, subjectId, programId, lessonId } = req.body ?? {};
+  // Клиент показывает один предмет за раз — остальные планы (с аннотациями и тестами) не гоним по сети
+  const onlySubject = typeof subjectId === 'string' && subjectId ? subjectId : null;
   if (!initData || !telegramId) {
     return res.status(400).json({ error: 'Нет данных запроса.' });
   }
@@ -103,7 +105,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    const programs = [...byId.values()].sort((a, b) => {
+    const visible = [...byId.values()]
+      .filter(p => !onlySubject || p.subjectId === onlySubject);
+
+    // Аннотация, вопросы и тесты занимают сотни килобайт на предмет, поэтому
+    // список занятий отдаётся без них, а текст одного занятия приходит по запросу.
+    if (typeof programId === 'string' && typeof lessonId === 'string') {
+      const lesson = visible.find(p => p.id === programId)?.lessons.find(l => l.id === lessonId);
+      if (!lesson) return res.status(404).json({ error: 'Занятие не найдено.' });
+      const { annotation, images, questions, tests } = lesson;
+      return res.status(200).json({ ok: true, content: { annotation, images, questions, tests } });
+    }
+
+    const programs = visible.sort((a, b) => {
       if (a.subjectId !== b.subjectId) return a.subjectId.localeCompare(b.subjectId);
       return a.course - b.course;
     }).map(p => {
@@ -116,7 +130,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         title: p.title,
         sourceDoc: p.sourceDoc ?? null,
         course: p.course,
-        lessons: p.lessons,
+        lessons: p.lessons.map(l => {
+          const { annotation, images, questions, tests, ...rest } = l;
+          const hasContent = !!(annotation?.length || images?.length || questions?.length || tests?.length);
+          return hasContent ? { ...rest, hasContent } : rest;
+        }),
         lectures: p.lectures,
       };
     });

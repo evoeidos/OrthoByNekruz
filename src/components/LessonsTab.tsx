@@ -3,11 +3,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  ArrowLeft, ArrowRight, BookOpen, CalendarDays, CheckCircle2, ChevronRight,
-  Circle, GraduationCap, Target, X,
+  ArrowLeft, ArrowRight, BookOpen, CalendarDays, CheckCircle2, ChevronDown, ChevronRight,
+  Circle, GraduationCap, HelpCircle, ListChecks, Target, X,
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { Lecture, Lesson, LessonKind, LessonSection } from '@/lib/curriculum';
+import type {
+  AnnotationBlock, Lecture, Lesson, LessonKind, LessonSection, LessonTest,
+} from '@/lib/curriculum';
 import { ReadingImages, useImageZoom } from '@/components/ImageZoom';
 import { TermAtlas } from '@/components/TermAtlas';
 import { getSubject } from '@/lib/subjects';
@@ -35,8 +37,17 @@ interface StudentProgram {
 }
 
 /** Занятие вместе с курсом и семестром, из которого оно пришло. */
+/** Тяжёлая часть занятия, которая приходит отдельным запросом. */
+interface LessonContent {
+  annotation?: AnnotationBlock[];
+  images?: string[];
+  questions?: string[];
+  tests?: LessonTest[];
+}
+
 interface FlatLesson {
   lesson: Lesson;
+  programId: string;
   course: number;
   semester?: number;
 }
@@ -81,7 +92,7 @@ function buildSubjectViews(programs: StudentProgram[]): SubjectView[] {
 
     for (const p of sorted) {
       for (const lesson of p.lessons) {
-        items.push({ lesson, course: p.course, semester: lesson.semester });
+        items.push({ lesson, programId: p.id, course: p.course, semester: lesson.semester });
       }
       lectures.push(...p.lectures);
     }
@@ -121,9 +132,11 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
   const [failed, setFailed] = useState(false);
   const [readingId, setReadingId] = useState<string | null>(null);
   const [done, setDone] = useState<Set<string>>(new Set());
+  const [contents, setContents] = useState<Record<string, LessonContent | 'loading' | 'failed'>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
+    setPrograms([]);
     setFailed(false);
     try {
       const tgId = localStorage.getItem('user_tg_id') || '';
@@ -133,7 +146,7 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telegramId: tgId, initData }),
+        body: JSON.stringify({ telegramId: tgId, initData, subjectId: subject }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(String(d.error || 'Ошибка'));
@@ -144,7 +157,7 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [subject]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -174,7 +187,48 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
   }, [view]);
 
   const readingIndex = view ? view.items.findIndex(i => i.lesson.id === readingId) : -1;
-  const reading = readingIndex >= 0 && view ? view.items[readingIndex] : null;
+  const readingBase = readingIndex >= 0 && view ? view.items[readingIndex] : null;
+  const readingKey = readingBase ? `${readingBase.programId}/${readingBase.lesson.id}` : null;
+  const readingContent = readingKey ? contents[readingKey] : undefined;
+
+  const loadContent = useCallback(async (programId: string, lessonId: string) => {
+    const key = `${programId}/${lessonId}`;
+    setContents(prev => ({ ...prev, [key]: 'loading' }));
+    try {
+      const tgId = localStorage.getItem('user_tg_id') || '';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const initData = (window as any).Telegram?.WebApp?.initData || '';
+      const r = await fetch('/api/curriculum', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telegramId: tgId, initData, subjectId: subject, programId, lessonId }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(String(d.error || 'Ошибка'));
+      setContents(prev => ({ ...prev, [key]: (d.content ?? {}) as LessonContent }));
+    } catch {
+      setContents(prev => ({ ...prev, [key]: 'failed' }));
+    }
+  }, [subject]);
+
+  useEffect(() => {
+    if (!readingBase?.lesson.hasContent || !readingKey) return;
+    if (contents[readingKey] === undefined) void loadContent(readingBase.programId, readingBase.lesson.id);
+  }, [readingBase, readingKey, contents, loadContent]);
+
+  // Текст занятия подмешивается к облегчённому уроку из списка
+  const reading = useMemo<FlatLesson | null>(() => {
+    if (!readingBase) return null;
+    if (readingContent && typeof readingContent === 'object') {
+      return { ...readingBase, lesson: { ...readingBase.lesson, ...readingContent } };
+    }
+    return readingBase;
+  }, [readingBase, readingContent]);
+  const readingContentState: 'ready' | 'loading' | 'failed' | 'none' =
+    !readingBase?.lesson.hasContent ? 'none'
+      : readingContent === 'failed' ? 'failed'
+        : readingContent && readingContent !== 'loading' ? 'ready' : 'loading';
 
   const step = useCallback((delta: number) => {
     if (!view || readingIndex < 0) return;
@@ -214,7 +268,7 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
 
   if (!view) {
     const subjectLabel = getSubject(subject)?.label;
-    if (subjectLabel && subjects.length > 0) {
+    if (subjectLabel) {
       return (
         <EmptyState
           title={`Занятия по предмету «${subjectLabel}» готовятся`}
@@ -329,6 +383,8 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
             subjectLabel={view.label}
             allItems={view.items}
             isDone={done.has(reading.lesson.id)}
+            contentState={readingContentState}
+            onRetryContent={() => void loadContent(reading.programId, reading.lesson.id)}
             onToggleDone={() => toggleDone(reading.lesson.id)}
             onPrev={() => step(-1)}
             onNext={() => step(1)}
@@ -348,6 +404,8 @@ function ReadingView({
   subjectLabel,
   allItems,
   isDone,
+  contentState,
+  onRetryContent,
   onToggleDone,
   onPrev,
   onNext,
@@ -358,6 +416,8 @@ function ReadingView({
   subjectLabel: string;
   allItems: FlatLesson[];
   isDone: boolean;
+  contentState: 'ready' | 'loading' | 'failed' | 'none';
+  onRetryContent: () => void;
   onToggleDone: () => void;
   onPrev: () => void;
   onNext: () => void;
@@ -559,6 +619,34 @@ function ReadingView({
             </>
           )}
 
+          {contentState === 'loading' && (
+            <div className="text-[12px] py-2" style={{ color: 'var(--c-muted)' }}>
+              Загружаем текст занятия…
+            </div>
+          )}
+          {contentState === 'failed' && (
+            <button
+              type="button"
+              onClick={onRetryContent}
+              className="text-[12px] font-semibold py-2 text-left active:opacity-70"
+              style={{ color: accent }}
+            >
+              Не удалось загрузить текст занятия. Повторить
+            </button>
+          )}
+
+          {lesson.annotation?.length ? (
+            <AnnotationView blocks={lesson.annotation} accent={accent} fontSize={fontSize} />
+          ) : null}
+
+          {lesson.questions?.length ? (
+            <QuestionsView questions={lesson.questions} accent={accent} fontSize={fontSize} />
+          ) : null}
+
+          {lesson.tests?.length ? (
+            <TestsView tests={lesson.tests} accent={accent} fontSize={fontSize} />
+          ) : null}
+
           {lesson.objectives?.length ? (
             <>
               <div
@@ -746,6 +834,232 @@ function ReadingView({
       </div>
       {zoomOverlay}
     </motion.div>
+  );
+}
+
+function BlockHeader({
+  icon, label, accent,
+}: { icon: React.ReactNode; label: string; accent: string }) {
+  return (
+    <div
+      className="flex items-center gap-3"
+      style={{ borderTop: '1px solid var(--c-border)', paddingTop: 12 }}
+    >
+      <span className="flex-shrink-0" style={{ color: accent }}>{icon}</span>
+      <span
+        className="text-[11px] font-bold uppercase tracking-widest"
+        style={{ color: accent }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
+/** Аннотация методички: абзацы, списки и таблицы как на сайте кафедры. */
+function AnnotationView({
+  blocks, accent, fontSize,
+}: { blocks: AnnotationBlock[]; accent: string; fontSize: number }) {
+  const bodyColor = 'color-mix(in srgb, var(--c-text) 92%, transparent)';
+  return (
+    <>
+      <BlockHeader icon={<BookOpen className="w-4 h-4" />} label="Аннотация" accent={accent} />
+      <div className="flex flex-col gap-2.5">
+        {blocks.map((b, i) => {
+          if (b.type === 'table') {
+            const [head, ...body] = b.rows;
+            return (
+              <div
+                key={i}
+                className="overflow-x-auto rounded-lg"
+                style={{ border: '1px solid var(--c-border)' }}
+              >
+                <table
+                  className="w-full border-collapse"
+                  style={{ fontSize: `${fontSize * 0.82}px`, color: bodyColor }}
+                >
+                  {body.length > 0 && (
+                    <thead>
+                      <tr style={{ background: 'var(--c-card)' }}>
+                        {head.map((c, ci) => (
+                          <th
+                            key={ci}
+                            className="text-left font-bold px-2.5 py-1.5 align-top"
+                            style={{ borderBottom: '1px solid var(--c-border)' }}
+                          >
+                            {c}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                  )}
+                  <tbody>
+                    {(body.length > 0 ? body : [head]).map((row, ri) => (
+                      <tr key={ri}>
+                        {row.map((c, ci) => (
+                          <td
+                            key={ci}
+                            className="px-2.5 py-1.5 align-top"
+                            style={{ borderTop: ri > 0 ? '1px solid var(--c-border)' : undefined }}
+                          >
+                            {c}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          }
+          if (b.type === 'li') {
+            return (
+              <div key={i} className="flex gap-2.5 pl-1">
+                <span className="flex-shrink-0" style={{ color: accent, marginTop: 1 }}>•</span>
+                <span
+                  className="leading-relaxed break-words"
+                  style={{ fontSize: `${fontSize * 0.94}px`, color: bodyColor }}
+                >
+                  {b.text}
+                </span>
+              </div>
+            );
+          }
+          return (
+            <p
+              key={i}
+              className="leading-relaxed break-words"
+              style={{ fontSize: `${fontSize}px`, color: bodyColor }}
+            >
+              {b.text}
+            </p>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+/** Сворачиваемый блок: вопросов и тестов в методичке десятки. */
+function CollapsibleBlock({
+  icon, label, count, accent, children,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  count: number;
+  accent: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-3 w-full text-left active:opacity-70 transition-opacity"
+        style={{ borderTop: '1px solid var(--c-border)', paddingTop: 12 }}
+        aria-expanded={open}
+      >
+        <span className="flex-shrink-0" style={{ color: accent }}>{icon}</span>
+        <span
+          className="flex-1 text-[11px] font-bold uppercase tracking-widest"
+          style={{ color: accent }}
+        >
+          {label} · {count}
+        </span>
+        <ChevronDown
+          className="w-4 h-4 flex-shrink-0 transition-transform"
+          style={{ color: 'var(--c-muted)', transform: open ? 'rotate(180deg)' : undefined }}
+        />
+      </button>
+      {open && children}
+    </>
+  );
+}
+
+function QuestionsView({
+  questions, accent, fontSize,
+}: { questions: string[]; accent: string; fontSize: number }) {
+  return (
+    <CollapsibleBlock
+      icon={<HelpCircle className="w-4 h-4" />}
+      label="Вопросы по теме"
+      count={questions.length}
+      accent={accent}
+    >
+      <ol className="flex flex-col gap-2.5">
+        {questions.map((q, i) => (
+          <li key={i} className="flex gap-2.5">
+            <span
+              className="flex-shrink-0 font-extrabold tabular-nums"
+              style={{ fontSize: `${fontSize * 0.8}px`, color: accent, marginTop: 2 }}
+            >
+              {i + 1}
+            </span>
+            <span
+              className="leading-snug break-words"
+              style={{
+                fontSize: `${fontSize * 0.94}px`,
+                color: 'color-mix(in srgb, var(--c-text) 92%, transparent)',
+              }}
+            >
+              {q}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </CollapsibleBlock>
+  );
+}
+
+function TestsView({
+  tests, accent, fontSize,
+}: { tests: LessonTest[]; accent: string; fontSize: number }) {
+  return (
+    <CollapsibleBlock
+      icon={<ListChecks className="w-4 h-4" />}
+      label="Тесты для самопроверки"
+      count={tests.length}
+      accent={accent}
+    >
+      <ol className="flex flex-col gap-4">
+        {tests.map((t, i) => (
+          <li key={i} className="flex flex-col gap-1.5">
+            <div className="flex gap-2.5">
+              <span
+                className="flex-shrink-0 font-extrabold tabular-nums"
+                style={{ fontSize: `${fontSize * 0.8}px`, color: accent, marginTop: 2 }}
+              >
+                {i + 1}
+              </span>
+              <span
+                className="leading-snug font-semibold break-words"
+                style={{ fontSize: `${fontSize * 0.92}px`, color: 'var(--c-text)' }}
+              >
+                {t.question}
+              </span>
+            </div>
+            <ul className="flex flex-col gap-1 pl-6">
+              {t.options.map((o, oi) => (
+                <li
+                  key={oi}
+                  className="flex gap-2 leading-snug break-words"
+                  style={{
+                    fontSize: `${fontSize * 0.88}px`,
+                    color: 'color-mix(in srgb, var(--c-text) 88%, transparent)',
+                  }}
+                >
+                  <span className="flex-shrink-0 tabular-nums" style={{ color: 'var(--c-muted)' }}>
+                    {oi + 1})
+                  </span>
+                  <span>{o}</span>
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ol>
+    </CollapsibleBlock>
   );
 }
 
@@ -1063,6 +1377,7 @@ function splitTerm(term: string): { ru: string; la: string | null } {
 export function LessonsDesignPreview() {
   const [open, setOpen] = useState(true);
   const demo: FlatLesson = {
+    programId: 'preview',
     course: 2,
     semester: 3,
     lesson: {
@@ -1144,6 +1459,8 @@ export function LessonsDesignPreview() {
           subjectLabel="Анатомия"
           allItems={[demo]}
           isDone={false}
+          contentState="none"
+          onRetryContent={() => undefined}
           onToggleDone={() => undefined}
           onPrev={() => undefined}
           onNext={() => undefined}
