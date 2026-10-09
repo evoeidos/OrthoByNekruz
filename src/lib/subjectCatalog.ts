@@ -36,7 +36,7 @@ const MODULE_META: Record<ModuleKind, { label: string; description: string }> = 
   },
 };
 
-/** Как /api/subject-data: JSON попадает в бандл через require, fs на Vercel не работает. */
+/** Как /api/subject-data: JSON попадает в бандл через require, а не читается через fs. */
 function moduleDataAvailable(fileName: string): boolean {
   if (!fileName) return false;
   try {

@@ -29,7 +29,7 @@ function hasNativeRedisEnv(): boolean {
 
 /**
  * Timeweb / обычный Redis: REDIS_URL или REDIS_HOST+REDIS_PASSWORD.
- * Upstash / Vercel KV: UPSTASH_REDIS_REST_* или KV_REST_API_*.
+ * Upstash REST: UPSTASH_REDIS_REST_* или KV_REST_API_*.
  * Нативный Redis предпочтительнее, если задан оба варианта.
  */
 export function createRedisFromEnv(): AppRedis {
