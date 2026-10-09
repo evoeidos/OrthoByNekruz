@@ -10,6 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Lecture, Lesson, LessonKind, LessonSection } from '@/lib/curriculum';
 import { ReadingImages, useImageZoom } from '@/components/ImageZoom';
 import { TermAtlas } from '@/components/TermAtlas';
+import { getSubject } from '@/lib/subjects';
 
 // Локальная копия подписей: импорт значения из curriculum притащил бы в
 // клиентский бандл все планы кафедр из файлов.
@@ -109,12 +110,15 @@ function sectionTitle(item: FlatLesson): string {
     : `${item.course} курс`;
 }
 
-export const LessonsTab = ({ onOpenProfile }: { onOpenProfile?: () => void }) => {
+export const LessonsTab = ({ subject, onOpenProfile }: {
+  /** Предмет, выбранный в приложении: показываем только его план */
+  subject: string;
+  onOpenProfile?: () => void;
+}) => {
   const [programs, setPrograms] = useState<StudentProgram[]>([]);
   const [studyGroup, setStudyGroup] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
   const [readingId, setReadingId] = useState<string | null>(null);
   const [done, setDone] = useState<Set<string>>(new Set());
 
@@ -146,19 +150,9 @@ export const LessonsTab = ({ onOpenProfile }: { onOpenProfile?: () => void }) =>
 
   const subjects = useMemo(() => buildSubjectViews(programs), [programs]);
 
-  useEffect(() => {
-    if (subjects.length === 0) {
-      setActiveSubjectId(null);
-      return;
-    }
-    setActiveSubjectId(prev => (
-      prev && subjects.some(s => s.subjectId === prev) ? prev : subjects[0].subjectId
-    ));
-  }, [subjects]);
-
   const view = useMemo(
-    () => subjects.find(s => s.subjectId === activeSubjectId) ?? null,
-    [subjects, activeSubjectId],
+    () => subjects.find(s => s.subjectId === subject) ?? null,
+    [subjects, subject],
   );
 
   useEffect(() => {
@@ -219,6 +213,16 @@ export const LessonsTab = ({ onOpenProfile }: { onOpenProfile?: () => void }) =>
   }
 
   if (!view) {
+    const subjectLabel = getSubject(subject)?.label;
+    if (subjectLabel && subjects.length > 0) {
+      return (
+        <EmptyState
+          title={`Занятия по предмету «${subjectLabel}» готовятся`}
+          text="План кафедры по этому предмету ещё не добавлен. Он появится здесь, как только будет готов."
+          action={{ label: 'Обновить', onClick: () => void load() }}
+        />
+      );
+    }
     return (
       <EmptyState
         title={`Для группы ${studyGroup} занятий пока нет`}
@@ -257,31 +261,6 @@ export const LessonsTab = ({ onOpenProfile }: { onOpenProfile?: () => void }) =>
         <div className="text-[12px] mt-1 leading-snug" style={{ color: 'var(--c-muted)' }}>
           {view.label} · весь курс, {view.items.length} занятий
         </div>
-
-        {subjects.length > 1 && (
-          <div className="flex flex-wrap gap-1.5 mt-3">
-            {subjects.map(s => {
-              const active = s.subjectId === view.subjectId;
-              return (
-                <button
-                  key={s.subjectId}
-                  type="button"
-                  onClick={() => setActiveSubjectId(s.subjectId)}
-                  className="text-[12px] font-semibold px-2.5 py-1 rounded-full transition-colors"
-                  style={{
-                    background: active
-                      ? `color-mix(in srgb, ${s.color} 18%, transparent)`
-                      : 'var(--c-card)',
-                    color: active ? s.color : 'var(--c-muted)',
-                    border: `1px solid ${active ? s.color : 'var(--c-border)'}`,
-                  }}
-                >
-                  {s.label}
-                </button>
-              );
-            })}
-          </div>
-        )}
 
         <div
           className="flex items-center gap-1.5 mt-3 text-[11.5px]"

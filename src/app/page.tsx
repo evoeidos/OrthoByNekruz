@@ -1905,7 +1905,7 @@ export default function Home() {
       )}
       <div className="flex-1 overflow-hidden relative">
         {activeTab === 'lessons'   && (
-          <LessonsTab onOpenProfile={() => setActiveTab('stats')} />
+          <LessonsTab subject={subject} onOpenProfile={() => setActiveTab('stats')} />
         )}
         {activeTab === 'questions' && renderModuleTab('questions', (
           <QuestionsTab
