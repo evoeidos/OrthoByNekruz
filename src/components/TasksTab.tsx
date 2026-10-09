@@ -531,7 +531,7 @@ export const TasksTab = ({
           onClick={() => setZoomList([])}
         >
           <button
-            className="absolute top-4 right-4 w-10 h-10 rounded-full flex items-center justify-center"
+            className="absolute top-4 right-4 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform duration-150"
             style={{ background: 'hsl(0 0% 100% / 0.15)', color: '#fff' }}
             onClick={e => { e.stopPropagation(); setZoomList([]); }}
           >

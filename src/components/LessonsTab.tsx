@@ -875,7 +875,7 @@ function SectionPage({
           type="button"
           onClick={onPrev}
           disabled={!hasPrev}
-          className="text-[12px] font-semibold px-3 py-1.5 rounded-full disabled:opacity-30"
+          className="text-[12px] font-semibold px-3 py-1.5 rounded-full disabled:opacity-30 active:scale-95 transition-transform duration-150"
           style={{ color: accent, border: `1px solid ${accent}` }}
         >
           ← Назад
@@ -884,7 +884,7 @@ function SectionPage({
           type="button"
           onClick={onNext}
           disabled={!hasNext}
-          className="text-[12px] font-semibold px-3 py-1.5 rounded-full disabled:opacity-30"
+          className="text-[12px] font-semibold px-3 py-1.5 rounded-full disabled:opacity-30 active:scale-95 transition-transform duration-150"
           style={{
             background: hasNext ? accent : 'transparent',
             color: hasNext ? '#fff' : 'var(--c-muted)',
@@ -930,7 +930,7 @@ function LessonRow({
       <button
         type="button"
         onClick={onToggleDone}
-        className="flex-shrink-0"
+        className="flex-shrink-0 active:scale-90 transition-transform duration-150"
         aria-label={isDone ? 'Снять отметку' : 'Отметить как пройденное'}
         style={{ color: isDone ? accent : 'var(--c-muted)' }}
       >
@@ -942,7 +942,7 @@ function LessonRow({
       <button
         type="button"
         onClick={onOpen}
-        className="flex-1 flex items-center gap-2.5 text-left min-w-0"
+        className="flex-1 flex items-center gap-2.5 text-left min-w-0 active:scale-[0.98] transition-transform duration-150"
       >
         <span
           className="flex-shrink-0 text-[12px] font-extrabold tabular-nums w-7 text-center"
@@ -1053,7 +1053,7 @@ function EmptyState({
         <button
           type="button"
           onClick={action.onClick}
-          className="mt-1 text-[13px] font-bold px-4 py-2 rounded-full"
+          className="mt-1 text-[13px] font-bold px-4 py-2 rounded-full active:scale-95 transition-transform duration-150"
           style={{ background: 'var(--c-primary)', color: 'var(--c-bg)' }}
         >
           {action.label}

@@ -153,7 +153,7 @@ export const ResourcesSheet: React.FC<ResourcesSheetProps> = ({ subject, accentC
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center"
+            className="w-8 h-8 rounded-full flex items-center justify-center active:scale-90 transition-transform duration-150"
             style={{ background: 'var(--c-border)', color: 'var(--c-muted)' }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none"

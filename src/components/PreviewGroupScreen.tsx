@@ -93,7 +93,7 @@ export const PreviewGroupScreen: React.FC<PreviewGroupScreenProps> = ({
           type="button"
           onClick={submit}
           disabled={loading || value.replace(/\D/g, '').length < 2}
-          className="w-full h-[52px] rounded-2xl text-[15px] font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50"
+          className="w-full h-[52px] rounded-2xl text-[15px] font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.97] transition-transform duration-150"
           style={{
             background: 'var(--c-primary)',
             color: 'var(--c-bg)',

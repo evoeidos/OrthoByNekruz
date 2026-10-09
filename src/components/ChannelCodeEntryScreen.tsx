@@ -164,7 +164,7 @@ export const ChannelCodeEntryScreen: React.FC<ChannelCodeEntryScreenProps> = ({
             type="button"
             onClick={submit}
             disabled={!promoReady || loading}
-            className="w-full h-[52px] rounded-2xl text-[15px] font-bold inline-flex items-center justify-center gap-2 disabled:opacity-45"
+            className="w-full h-[52px] rounded-2xl text-[15px] font-bold inline-flex items-center justify-center gap-2 disabled:opacity-45 active:scale-[0.97] transition-transform duration-150"
             style={{
               background: promoReady ? 'var(--c-primary)' : 'var(--c-card)',
               color: promoReady ? 'var(--c-bg)' : 'var(--c-muted)',
@@ -182,7 +182,7 @@ export const ChannelCodeEntryScreen: React.FC<ChannelCodeEntryScreenProps> = ({
             type="button"
             onClick={onCancel}
             disabled={loading}
-            className="w-full h-12 rounded-2xl text-sm font-semibold disabled:opacity-45"
+            className="w-full h-12 rounded-2xl text-sm font-semibold disabled:opacity-45 active:scale-[0.97] transition-transform duration-150"
             style={{
               background: 'var(--c-card)',
               color: 'var(--c-muted)',

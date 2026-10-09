@@ -609,7 +609,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
                       <div className="flex items-center gap-2 mt-2.5 flex-wrap">
                         <button
                           onClick={openDatePicker}
-                          className="px-2.5 py-1.5 rounded-[9px] text-[12px] font-semibold inline-flex items-center gap-1.5"
+                          className="px-2.5 py-1.5 rounded-[9px] text-[12px] font-semibold inline-flex items-center gap-1.5 active:scale-95 transition-transform duration-150"
                           style={{ background: 'var(--c-primary-soft)', color: 'var(--c-primary-strong)', border: '1px solid var(--c-primary-br)' }}
                         >
                           <Calendar className="w-3 h-3" /> {dateLabel}

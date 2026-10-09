@@ -768,9 +768,9 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
                 Текущая попытка по Билету {currentTicket} ({score}/{items.length}) сохранится как незавершённая.
               </div>
               <div className="flex gap-2">
-                <button onClick={() => setConfirmExit(false)} className="flex-1 h-11 rounded-xl font-bold text-[13px]"
+                <button onClick={() => setConfirmExit(false)} className="flex-1 h-11 rounded-xl font-bold text-[13px] active:scale-[0.97] transition-transform duration-150"
                   style={{ background: 'var(--c-border)', color: 'var(--c-text)' }}>Продолжить</button>
-                <button onClick={handleHardExit} className="flex-1 h-11 rounded-xl font-bold text-[13px]"
+                <button onClick={handleHardExit} className="flex-1 h-11 rounded-xl font-bold text-[13px] active:scale-[0.97] transition-transform duration-150"
                   style={{ background: 'hsl(var(--destructive))', color: 'var(--c-bg)' }}>Выйти</button>
               </div>
             </motion.div>

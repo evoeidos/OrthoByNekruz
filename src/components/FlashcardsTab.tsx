@@ -78,7 +78,7 @@ function TopicPickerModal({
           <button
             type="button"
             onClick={onClose}
-            className="w-9 h-9 rounded-full flex items-center justify-center"
+            className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform duration-150"
             style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}
             aria-label="Закрыть"
           >
@@ -405,7 +405,7 @@ export const FlashcardsTab: React.FC<FlashcardsTabProps> = ({
                 <button
                   type="button"
                   onClick={handleFlip}
-                  className="flashcard-scene w-full max-w-sm flex-1 max-h-[min(52vh,420px)] min-h-[240px] mb-4"
+                  className="flashcard-scene w-full max-w-sm flex-1 max-h-[min(52vh,420px)] min-h-[240px] mb-4 active:scale-[0.98] transition-transform duration-150"
                   aria-label={flipped ? 'Нажми, чтобы вернуть вопрос' : 'Нажми, чтобы перевернуть'}
                 >
                   <div className={`flashcard-inner w-full h-full ${flipped ? 'flashcard-flipped' : ''}`}>

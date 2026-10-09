@@ -312,7 +312,7 @@ export const PreviewOnboardingScreen: React.FC<PreviewOnboardingScreenProps> = (
             type="button"
             onClick={onBackToPurchased}
             disabled={loading || backBusy}
-            className="w-full h-12 rounded-2xl text-sm font-semibold disabled:opacity-45"
+            className="w-full h-12 rounded-2xl text-sm font-semibold disabled:opacity-45 active:scale-[0.97] transition-transform duration-150"
             style={{
               background: 'var(--c-card)',
               color: 'var(--c-muted)',
@@ -357,7 +357,7 @@ export const PreviewOnboardingScreen: React.FC<PreviewOnboardingScreenProps> = (
                 type="button"
                 onClick={goBack}
                 disabled={loading}
-                className="w-full h-12 rounded-2xl text-sm font-semibold disabled:opacity-45"
+                className="w-full h-12 rounded-2xl text-sm font-semibold disabled:opacity-45 active:scale-[0.97] transition-transform duration-150"
                 style={{
                   background: 'var(--c-card)',
                   color: 'var(--c-muted)',
@@ -372,7 +372,7 @@ export const PreviewOnboardingScreen: React.FC<PreviewOnboardingScreenProps> = (
               type="button"
               onClick={goBack}
               disabled={loading}
-              className="w-full h-[52px] rounded-2xl text-[15px] font-semibold disabled:opacity-45"
+              className="w-full h-[52px] rounded-2xl text-[15px] font-semibold disabled:opacity-45 active:scale-[0.97] transition-transform duration-150"
               style={{
                 background: 'var(--c-card)',
                 color: 'var(--c-text)',
@@ -437,7 +437,7 @@ function ConfirmModal({
             type="button"
             disabled={loading}
             onClick={onBack}
-            className="flex-1 h-11 rounded-xl text-sm font-semibold"
+            className="flex-1 h-11 rounded-xl text-sm font-semibold active:scale-[0.97] transition-transform duration-150"
             style={{ background: 'var(--c-bg)', border: '1px solid var(--c-border)', color: 'var(--c-text)' }}
           >
             Назад
@@ -446,7 +446,7 @@ function ConfirmModal({
             type="button"
             disabled={loading}
             onClick={onPrimary}
-            className="flex-1 h-11 rounded-xl text-sm font-bold"
+            className="flex-1 h-11 rounded-xl text-sm font-bold active:scale-[0.97] transition-transform duration-150"
             style={{ background: 'var(--c-primary)', color: 'var(--c-bg)' }}
           >
             {loading ? '...' : primaryLabel}

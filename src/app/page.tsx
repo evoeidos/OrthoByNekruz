@@ -1840,7 +1840,7 @@ export default function Home() {
           <button
             type="button"
             onClick={() => refreshAccess()}
-            className="w-full h-12 rounded-2xl text-sm font-semibold"
+            className="w-full h-12 rounded-2xl text-sm font-semibold active:scale-[0.97] transition-transform duration-150"
             style={{ background: 'var(--c-primary)', color: 'var(--c-bg)' }}
           >
             Обновить
@@ -1848,7 +1848,7 @@ export default function Home() {
           <button
             type="button"
             onClick={logoutLocal}
-            className="w-full h-12 rounded-2xl text-sm font-semibold"
+            className="w-full h-12 rounded-2xl text-sm font-semibold active:scale-[0.97] transition-transform duration-150"
             style={{ background: 'var(--c-card)', color: 'var(--c-text)', border: '1px solid var(--c-border)' }}
           >
             Войти заново

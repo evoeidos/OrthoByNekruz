@@ -110,7 +110,7 @@ export const TrustAccessNotice: React.FC<TrustAccessNoticeProps> = ({
               type="button"
               aria-label="Скрыть"
               onClick={onDismiss}
-              className="shrink-0 rounded-lg p-1.5 transition-colors"
+              className="shrink-0 rounded-lg p-1.5 transition duration-150 active:scale-90"
               style={{ color: 'var(--c-muted)' }}
             >
               <X className="h-4 w-4" />

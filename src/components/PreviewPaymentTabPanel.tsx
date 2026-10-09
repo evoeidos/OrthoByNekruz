@@ -211,7 +211,7 @@ export const PreviewPaymentTabPanel: React.FC<PreviewPaymentTabPanelProps> = ({
       type="button"
       disabled={backBusy || checking}
       onClick={onBackToPurchased ?? onBackToAvailable}
-      className="w-full h-11 rounded-xl text-sm font-semibold disabled:opacity-45"
+      className="w-full h-11 rounded-xl text-sm font-semibold disabled:opacity-45 active:scale-[0.97] transition-transform duration-150"
       style={{
         background: 'var(--c-card)',
         border: '1px solid var(--c-border)',
