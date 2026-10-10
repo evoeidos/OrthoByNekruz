@@ -40,6 +40,7 @@ import type {
   KrasgmuTopicPlan,
 } from '@/lib/krasgmu/types';
 import { findActiveCycle, krasnoyarskNow } from '@/lib/uniHelpers';
+import { reserveBrowserLogin, withReloginLock } from '@/lib/krasgmu/loginGuard';
 
 // Личный кабинет живёт на page[common]=user (не page[org]=dean — та страница
 // чисто информационная и не персонализируется). id — цифры из логина ('z93339' -> '93339').
@@ -82,10 +83,24 @@ export async function ensureKrasgmuSession(
     return { cookies, login: binding.universityLogin };
   }
 
-  const password = loadPassword(binding);
-  cookies = await loginKrasgmu(binding.universityLogin, password);
-  await saveBinding(redis, tgId, binding.universityLogin, password, cookies);
-  return { cookies, login: binding.universityLogin };
+  const login = binding.universityLogin;
+  return withReloginLock(
+    redis,
+    tgId,
+    async () => {
+      await reserveBrowserLogin(redis);
+      const password = loadPassword(binding);
+      const fresh = await loginKrasgmu(login, password);
+      await saveBinding(redis, tgId, login, password, fresh);
+      return { cookies: fresh, login };
+    },
+    async () => {
+      // saveBinding обновляет boundAt — значит, параллельный запрос уже вошёл.
+      const updated = await getBinding(redis, tgId);
+      if (!updated || updated.boundAt === binding.boundAt) return null;
+      return { cookies: loadSessionCookies(updated), login: updated.universityLogin };
+    },
+  );
 }
 
 export async function fetchKrasgmuSchedule(

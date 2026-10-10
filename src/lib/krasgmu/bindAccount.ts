@@ -2,6 +2,7 @@ import type { AppRedis } from '@/lib/redis';
 import { KrasgmuAuthError, loginKrasgmu } from '@/lib/krasgmu/client';
 import { KrasgmuConfigError } from '@/lib/krasgmu/crypto';
 import { saveBinding } from '@/lib/krasgmu/store';
+import { checkBindRateLimit, reserveBrowserLogin } from '@/lib/krasgmu/loginGuard';
 import { clearUniversityCache } from '@/lib/universityParser';
 
 export type BindUniversityResult =
@@ -28,6 +29,8 @@ export async function bindUniversityAccount(
   }
 
   try {
+    await checkBindRateLimit(redis, tgId);
+    await reserveBrowserLogin(redis);
     const cookies = await loginKrasgmu(loginStr, passStr);
     await saveBinding(redis, tgId, loginStr, passStr, cookies);
     // Иначе до 5 минут после переподключения к другому аккаунту могут отдаваться
@@ -40,7 +43,9 @@ export async function bindUniversityAccount(
     };
   } catch (e) {
     if (e instanceof KrasgmuAuthError) {
-      const status = e.code === 'invalid_credentials' ? 400 : 502;
+      const status = e.code === 'invalid_credentials' ? 400
+        : e.code === 'rate_limited' ? 429
+        : 502;
       return { ok: false, status, error: e.message, code: e.code };
     }
     if (e instanceof KrasgmuConfigError) {
