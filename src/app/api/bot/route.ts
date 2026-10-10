@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
 import { createRedisFromEnv } from '@/lib/redis';
 import { getTelegramApiBase, tgCall } from '@/lib/telegramApi';
@@ -45,9 +46,21 @@ function commandOf(text: string): string {
   return raw.toLowerCase().replace(/^\//, '').split('@')[0];
 }
 
+/** Сравнение с TELEGRAM_WEBHOOK_SECRET без утечки по времени. */
+function secretMatches(provided: string | null): boolean {
+  if (!WEBHOOK_SECRET || !provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(WEBHOOK_SECRET);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * Диагностика связи с Telegram: GET /api/bot?diag=1 с заголовком
+ * x-diag-secret: <TELEGRAM_WEBHOOK_SECRET>. Без секрета — просто { ok: true }.
+ */
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  if (url.searchParams.get('diag') !== '1') {
+  if (url.searchParams.get('diag') !== '1' || !secretMatches(req.headers.get('x-diag-secret'))) {
     return NextResponse.json({ ok: true });
   }
   const started = Date.now();
@@ -94,18 +107,16 @@ async function isDuplicateUpdate(updateId: unknown): Promise<boolean> {
 
 export async function POST(req: Request) {
   try {
-    // Секрет отклоняет запрос только если заголовок ПРИШЁЛ и он неверный.
-    // Если секрета нет в env или прокси/старый вебхук не шлёт заголовок —
-    // пропускаем: иначе /start молчит, пока вебхук не перерегистрируют.
+    // Вебхук зарегистрирован с secret_token (scripts/set-webhook.mjs), и Telegram
+    // шлёт его в каждом апдейте. Без заголовка или с неверным — это не Telegram.
+    // Если бот замолчал после смены секрета — перерегистрируй вебхук скриптом.
     if (WEBHOOK_SECRET) {
-      const provided = req.headers.get('x-telegram-bot-api-secret-token');
-      if (provided && provided !== WEBHOOK_SECRET) {
-        console.warn('[bot] отклонён запрос с неверным secret token');
+      if (!secretMatches(req.headers.get('x-telegram-bot-api-secret-token'))) {
+        console.warn('[bot] отклонён запрос без верного secret token');
         return NextResponse.json({ ok: false }, { status: 401 });
       }
-      if (!provided) {
-        console.warn('[bot] webhook secret задан, но заголовок отсутствует — пропускаем');
-      }
+    } else {
+      console.warn('[bot] TELEGRAM_WEBHOOK_SECRET не задан — вебхук принимает запросы от кого угодно');
     }
 
     const update = await req.json();
