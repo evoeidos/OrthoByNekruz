@@ -34,6 +34,7 @@ import { getAllUserIds, registerUserId, removeUserId } from '@/lib/userIndex';
 import { isValidTelegramUsername, normalizeTelegramUsername } from '@/lib/tgLinks';
 import { resolveLastActivityIso } from '@/lib/userActivity';
 import { facultyDisplayFromUser, healUserFacultyFields } from '@/lib/facultyCodes';
+import { buildStudyGroupFromDigits, normalizeStudyGroup } from '@/lib/studyGroup';
 
 const redis        = createRedisFromEnv();
 const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
@@ -296,6 +297,7 @@ async function handleAdminUsers(req: NextApiRequest, res: NextApiResponse) {
 
   const {
     action, tgId, subject, enable, reason, section, contactUsername: contactUsernameRaw,
+    studyGroup: studyGroupRaw,
     page, limit, filter, q, sortBy, sortDir,
   } = req.body ?? {};
 
@@ -675,6 +677,26 @@ async function handleAdminUsers(req: NextApiRequest, res: NextApiResponse) {
           previewChosenModules: updated.previewChosenModules ?? null,
           paid: updated.paid === true,
         });
+      }
+
+      // Сменить закреплённую группу (студент сам её поменять не может — см.
+      // set_study_group в auth.ts). Цифры группы, буква факультета — по студенту.
+      if (action === 'set_study_group') {
+        const facultyId = String(user.facultyId || '').trim() || null;
+        const built = buildStudyGroupFromDigits(String(studyGroupRaw ?? ''), facultyId);
+        if (!built) {
+          return res.status(400).json({
+            error: facultyId ? 'Введи номер группы цифрами, например 108' : 'У студента не выбран факультет',
+          });
+        }
+        const group = normalizeStudyGroup(built);
+        const rules = await loadGroupAccessRules(redis);
+        const { user: updated } = applyGroupAccessToUser(
+          { ...user, studyGroup: group, lockedStudyGroup: group },
+          rules,
+        );
+        await saveUser(String(tgId), updated);
+        return res.status(200).json({ ok: true, studyGroup: group });
       }
 
       if (action === 'toggle_paid') {

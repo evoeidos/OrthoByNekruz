@@ -80,7 +80,7 @@ const RES_TYPE_OPTS: { id: ResType; label: string; emoji: string }[] = [
 
 type Filter = 'all' | 'blocked' | 'suspicious' | 'demo' | 'unpaid';
 type SortBy = 'registered' | 'lastActivity' | 'loginCount';
-type Action = 'block' | 'unblock' | 'reset_demo' | 'grant_direct_access' | 'force_payment_only' | 'confirm_preview' | 'confirm_preview_module' | 'reject_preview_module' | 'reopen_preview_vitrine' | 'toggle_subject' | 'toggle_section' | 'delete_user' | 'toggle_paid' | 'set_contact_username';
+type Action = 'block' | 'unblock' | 'reset_demo' | 'grant_direct_access' | 'force_payment_only' | 'confirm_preview' | 'confirm_preview_module' | 'reject_preview_module' | 'reopen_preview_vitrine' | 'toggle_subject' | 'toggle_section' | 'delete_user' | 'toggle_paid' | 'set_contact_username' | 'set_study_group';
 
 type PreviewModKind = 'questions' | 'tests' | 'tasks';
 type PreviewCatalogSettings = Record<string, {
@@ -358,6 +358,8 @@ function UserCard({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [contactDraft, setContactDraft] = useState(user.contactUsername || '');
   const [contactError, setContactError] = useState('');
+  const [groupDraft, setGroupDraft] = useState('');
+  const [groupError, setGroupError] = useState('');
 
   useEffect(() => {
     setContactDraft(user.contactUsername || '');
@@ -403,6 +405,17 @@ function UserCard({
     }
     setContactError('');
     onAction(user.tgId, 'set_contact_username', undefined, undefined, handle);
+  };
+
+  const saveStudyGroup = () => {
+    const digits = groupDraft.trim();
+    if (!/^\d{2,4}$/.test(digits)) {
+      setGroupError('Только цифры группы, например 108');
+      return;
+    }
+    setGroupError('');
+    onAction(user.tgId, 'set_study_group', undefined, undefined, digits);
+    setGroupDraft('');
   };
 
   return (
@@ -793,6 +806,43 @@ function UserCard({
                 <div style={{ fontSize: 11.5, color: T.success, marginTop: 6 }}>
                   Привязан @{user.contactUsername}
                 </div>
+              )}
+            </div>
+          )}
+
+          {user.studyGroup && (
+            <div style={{
+              background: T.surface, border: `1px solid ${T.border}`,
+              borderRadius: 10, padding: '10px 12px',
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 8, letterSpacing: 0.3 }}>
+                ГРУППА · {user.studyGroup}
+              </div>
+              <div style={{ fontSize: 12, color: T.textFaint, marginBottom: 8, lineHeight: 1.45 }}>
+                Студент сам сменить группу не может — она закрепляется при первом вводе. Буква факультета добавится сама.
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
+                <input
+                  value={groupDraft}
+                  onChange={e => { setGroupDraft(e.target.value); setGroupError(''); }}
+                  onClick={e => e.stopPropagation()}
+                  placeholder="108"
+                  inputMode="numeric"
+                  style={{
+                    flex: 1, minWidth: 0,
+                    background: T.surfaceAlt, color: T.text,
+                    border: `1px solid ${groupError ? T.danger + '66' : T.border}`,
+                    borderRadius: 8, padding: '8px 10px',
+                    fontSize: 13, fontFamily: FONT_MONO,
+                    outline: 'none',
+                  }}
+                />
+                <ActionBtn variant="primary" disabled={busy || !groupDraft.trim()} onClick={saveStudyGroup}>
+                  {busy ? '...' : 'Сменить'}
+                </ActionBtn>
+              </div>
+              {groupError && (
+                <div style={{ fontSize: 11.5, color: T.danger, marginTop: 6 }}>{groupError}</div>
               )}
             </div>
           )}
@@ -2037,6 +2087,9 @@ export default function AdminPage() {
       if (action === 'set_contact_username') {
         body.contactUsername = reason ?? '';
       }
+      if (action === 'set_study_group') {
+        body.studyGroup = reason ?? '';
+      }
       if ((action === 'confirm_preview_module' || action === 'reject_preview_module') && section) {
         body.module = section;
       }
@@ -2048,9 +2101,9 @@ export default function AdminPage() {
       });
 
       if (!r.ok) {
-        if (action === 'set_contact_username') {
+        if (action === 'set_contact_username' || action === 'set_study_group') {
           const err = await r.json().catch(() => ({}));
-          showToast((err as { error?: string }).error || 'Некорректный username');
+          showToast((err as { error?: string }).error || 'Некорректное значение');
         } else {
           showToast('Ошибка действия');
         }
@@ -2214,6 +2267,8 @@ export default function AdminPage() {
             };
           case 'toggle_paid':
             return { ...u, paid: !u.paid };
+          case 'set_study_group':
+            return { ...u, studyGroup: (data.studyGroup as string | null) ?? u.studyGroup };
           case 'set_contact_username': {
             const handle = String(reason ?? '').trim();
             return {
@@ -2314,6 +2369,9 @@ export default function AdminPage() {
           msg = enabled ? `✓ «${sectionLabel}» включён в ${subjLabel}` : `«${sectionLabel}» скрыт в ${subjLabel}`;
           break;
         }
+        case 'set_study_group':
+          msg = `✓ Группа ${String(data.studyGroup ?? '')} закреплена`;
+          break;
         case 'set_contact_username': {
           const handle = String(reason ?? '').trim();
           msg = handle ? `✓ Контакт @${normalizeTelegramUsername(handle)} сохранён` : 'Контакт удалён';

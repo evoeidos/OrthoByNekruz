@@ -631,9 +631,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 : 'Сначала введи код доступа.',
             });
           }
+          // Группа закрепляется при первом вводе: от неё зависит бесплатный
+          // групповой доступ, и перебором номеров можно было найти открытую
+          // группу. Сценарии витрины обнуляют studyGroup (смена факультета,
+          // каталог, сброс пробника), поэтому закрепление в отдельном поле,
+          // которое они не трогают. Повторно ввести ту же группу можно,
+          // сменить — только через админа (reset_study_group).
+          const nextGroup = normalizeStudyGroup(built);
+          const lockedGroup = normalizeStudyGroup(
+            String(user.lockedStudyGroup || user.studyGroup || ''),
+          );
+          if (lockedGroup && lockedGroup !== nextGroup) {
+            return res.status(400).json({
+              error: `За тобой закреплена группа ${lockedGroup}. Если ошибся — напиши администратору.`,
+              groupLocked: true,
+            });
+          }
           const updated = {
             ...user,
-            studyGroup: normalizeStudyGroup(built),
+            studyGroup:       nextGroup,
+            lockedStudyGroup: nextGroup,
             username:   username ?? user.username,
             firstName:  firstName ?? user.firstName,
             lastName:   lastName ?? user.lastName,
