@@ -1,82 +1,16 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { AuthCampusBackdrop, AuthHeroPitch, AuthHeroTitle, FacultyAmbience } from '@/components/AuthFacultyExperience';
 import { applyWebAccountLocal, webAuth } from '@/lib/webAuthClient';
 
-type Props = {
-  onReady: (state: {
-    telegramId: string | null;
-    needTelegramLink: boolean;
-    needSubscription: boolean;
-    channel: string;
-  }) => void;
-  initialMode?: 'login' | 'register' | 'forgot';
-};
-
-export function WebAuthScreen({ onReady, initialMode = 'login' }: Props) {
-  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>(initialMode);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [password2, setPassword2] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-
-  const submit = useCallback(async () => {
-    if (loading) return;
-    setLoading(true);
-    setError('');
-    setMessage('');
-    try {
-      if (mode === 'forgot') {
-        const { res, data } = await webAuth('forgot', { email });
-        if (!res.ok) {
-          setError(data.error || 'Не удалось отправить письмо');
-          return;
-        }
-        setMessage(data.message || 'Проверь почту — отправили ссылку.');
-        return;
-      }
-      if (mode === 'register') {
-        if (password !== password2) {
-          setError('Пароли не совпадают');
-          return;
-        }
-        const { res, data } = await webAuth('register', { email, password });
-        if (!res.ok) {
-          setError(data.error || 'Не удалось зарегистрироваться');
-          return;
-        }
-        applyWebAccountLocal(data.account);
-        onReady({
-          telegramId: data.account?.telegramId || null,
-          needTelegramLink: !data.account?.telegramId,
-          needSubscription: false,
-          channel: 'nzsdental',
-        });
-        return;
-      }
-      const { res, data } = await webAuth('login', { email, password });
-      if (!res.ok) {
-        setError(data.error || 'Неверный email или пароль');
-        return;
-      }
-      applyWebAccountLocal(data.account);
-      onReady({
-        telegramId: data.account?.telegramId || null,
-        needTelegramLink: !data.account?.telegramId,
-        needSubscription: data.needSubscription === true,
-        channel: data.channel || 'nzsdental',
-      });
-    } catch {
-      setError('Ошибка соединения с сервером');
-    } finally {
-      setLoading(false);
-    }
-  }, [email, password, password2, mode, loading, onReady]);
-
+/**
+ * Вход на сайт вне Telegram — только через Telegram (OIDC): после входа
+ * /api/auth/telegram-oidc/callback ставит cookie-сессию и возвращает на «/»,
+ * где AuthGate уже видит сессию. Вход по email/паролю убран.
+ */
+export function WebAuthScreen() {
   return (
     <div
       className="dark flex flex-col items-center justify-center min-h-screen p-6 relative overflow-hidden pt-16"
@@ -90,89 +24,20 @@ export function WebAuthScreen({ onReady, initialMode = 'login' }: Props) {
           <AuthHeroPitch />
         </div>
         <div className="w-full space-y-4 bg-[#0A0E0C]/75 p-6 rounded-[28px] border border-white/10 backdrop-blur-xl shadow-2xl">
-          <p className="text-center text-[13px] text-white/70">
-            {mode === 'login' && 'Вход на сайт'}
-            {mode === 'register' && 'Регистрация'}
-            {mode === 'forgot' && 'Восстановление пароля'}
-          </p>
-          <input
-            type="email"
-            autoComplete="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full h-12 rounded-2xl px-4 bg-white/[0.05] border border-white/10 text-white text-[15px]"
-          />
-          {mode !== 'forgot' && (
-            <input
-              type="password"
-              autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-              placeholder="Пароль (от 8 символов)"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full h-12 rounded-2xl px-4 bg-white/[0.05] border border-white/10 text-white text-[15px]"
-            />
-          )}
-          {mode === 'register' && (
-            <input
-              type="password"
-              autoComplete="new-password"
-              placeholder="Повтори пароль"
-              value={password2}
-              onChange={(e) => setPassword2(e.target.value)}
-              className="w-full h-12 rounded-2xl px-4 bg-white/[0.05] border border-white/10 text-white text-[15px]"
-            />
-          )}
-          <button
-            type="button"
-            disabled={loading || !email || (mode !== 'forgot' && password.length < 8)}
-            onClick={() => void submit()}
-            className="w-full h-[52px] rounded-2xl text-[15px] font-semibold flex items-center justify-center gap-2 disabled:opacity-40"
+          <p className="text-center text-[13px] text-white/70">Вход на сайт</p>
+          <a
+            href="/api/auth/telegram-oidc/start"
+            className="w-full h-[52px] rounded-2xl text-[15px] font-semibold flex items-center justify-center gap-2"
             style={{
               background: 'linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary) / 0.8))',
               color: '#0A0E0C',
             }}
           >
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : mode === 'forgot' ? 'Отправить ссылку' : mode === 'register' ? 'Создать аккаунт' : 'Войти'}
-          </button>
-          {error && (
-            <p className="text-center text-[13px] text-red-300">{error}</p>
-          )}
-          {message && (
-            <p className="text-center text-[13px] text-emerald-300">{message}</p>
-          )}
-          {mode !== 'forgot' && (
-            <>
-              <div className="flex items-center gap-3 py-1">
-                <div className="h-px flex-1 bg-white/10" />
-                <span className="text-[11px] text-white/30">или</span>
-                <div className="h-px flex-1 bg-white/10" />
-              </div>
-              <a
-                href="/api/auth/telegram-oidc/start"
-                className="w-full h-12 rounded-2xl text-[14px] font-medium flex items-center justify-center gap-2 bg-white/[0.05] border border-white/10 text-white"
-              >
-                Войти через Telegram
-              </a>
-            </>
-          )}
-          <div className="flex flex-col gap-2 pt-1">
-            {mode === 'login' && (
-              <>
-                <button type="button" className="text-[12px] text-white/40" onClick={() => setMode('register')}>
-                  Нет аккаунта? Зарегистрироваться
-                </button>
-                <button type="button" className="text-[12px] text-white/40" onClick={() => setMode('forgot')}>
-                  Забыл пароль
-                </button>
-              </>
-            )}
-            {mode !== 'login' && (
-              <button type="button" className="text-[12px] text-white/40" onClick={() => setMode('login')}>
-                ← Ко входу
-              </button>
-            )}
-          </div>
+            Войти через Telegram
+          </a>
+          <p className="text-center text-[12px] text-white/40">
+            Или открой приложение в Telegram через бота.
+          </p>
         </div>
       </div>
     </div>

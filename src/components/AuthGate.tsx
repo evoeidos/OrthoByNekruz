@@ -68,24 +68,6 @@ export function AuthGate({ onAuthenticated }: Props) {
     return () => { cancelled = true; };
   }, []);
 
-  const afterWebReady = useCallback((state: {
-    telegramId: string | null;
-    needTelegramLink: boolean;
-    needSubscription: boolean;
-    channel: string;
-  }) => {
-    setChannel(state.channel || CHANNEL);
-    if (state.needTelegramLink || !state.telegramId) {
-      setPhase('link_telegram');
-      return;
-    }
-    if (state.needSubscription) {
-      setPhase('need_subscription');
-      return;
-    }
-    setPhase('faculty');
-  }, []);
-
   const afterLinked = useCallback((state: { telegramId: string; needSubscription: boolean }) => {
     if (state.needSubscription) {
       setPhase('need_subscription');
@@ -103,7 +85,7 @@ export function AuthGate({ onAuthenticated }: Props) {
   }
 
   if (phase === 'web_login') {
-    return <WebAuthScreen onReady={afterWebReady} />;
+    return <WebAuthScreen />;
   }
 
   if (phase === 'link_telegram') {

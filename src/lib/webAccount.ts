@@ -1,9 +1,10 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { randomBytes } from 'crypto';
 import type { AppRedis } from '@/lib/redis';
 
 export type WebAccount = {
   id: string;
-  // Аккаунты, созданные через Telegram OIDC-вход, обходятся без email/пароля.
+  // Веб-вход только через Telegram (OIDC). Поля email/пароля остались для
+  // совместимости со старыми записями и всегда null у новых аккаунтов.
   email: string | null;
   passwordHash: string | null;
   passwordSalt: string | null;
@@ -28,37 +29,12 @@ export function normalizeEmail(email: string): string {
   return String(email || '').trim().toLowerCase();
 }
 
-export function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(email));
-}
-
-export function hashPassword(password: string, salt?: string): { salt: string; hash: string } {
-  const s = salt || randomBytes(16).toString('hex');
-  const hash = scryptSync(password, s, 64).toString('hex');
-  return { salt: s, hash };
-}
-
-export function verifyPassword(password: string, salt: string, hash: string): boolean {
-  try {
-    const next = scryptSync(password, salt, 64);
-    const prev = Buffer.from(hash, 'hex');
-    if (next.length !== prev.length) return false;
-    return timingSafeEqual(next, prev);
-  } catch {
-    return false;
-  }
-}
-
 export function newSessionId(): string {
   return randomBytes(24).toString('base64url');
 }
 
 export function newAccountId(): string {
   return randomBytes(12).toString('hex');
-}
-
-export function hashResetToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
 }
 
 export async function getAccountById(redis: AppRedis, id: string): Promise<WebAccount | null> {
@@ -68,12 +44,6 @@ export async function getAccountById(redis: AppRedis, id: string): Promise<WebAc
     try { return JSON.parse(raw) as WebAccount; } catch { return null; }
   }
   return raw;
-}
-
-export async function getAccountByEmail(redis: AppRedis, email: string): Promise<WebAccount | null> {
-  const id = await redis.get<string>(emailKey(email));
-  if (!id) return null;
-  return getAccountById(redis, String(id));
 }
 
 export async function getAccountByTelegramId(redis: AppRedis, tgId: string): Promise<WebAccount | null> {
@@ -90,30 +60,6 @@ export async function saveAccount(redis: AppRedis, account: WebAccount): Promise
   if (account.telegramId) {
     await redis.set(tgKey(account.telegramId), account.id);
   }
-}
-
-export async function createAccount(
-  redis: AppRedis,
-  email: string,
-  password: string,
-): Promise<WebAccount> {
-  const normalized = normalizeEmail(email);
-  const existing = await getAccountByEmail(redis, normalized);
-  if (existing) {
-    throw new Error('EMAIL_TAKEN');
-  }
-  const { salt, hash } = hashPassword(password);
-  const account: WebAccount = {
-    id: newAccountId(),
-    email: normalized,
-    passwordHash: hash,
-    passwordSalt: salt,
-    telegramId: null,
-    sessionId: newSessionId(),
-    createdAt: new Date().toISOString(),
-  };
-  await saveAccount(redis, account);
-  return account;
 }
 
 /** Аккаунт по входу через Telegram OIDC — без email/пароля, telegramId уже проверен. */
