@@ -1786,6 +1786,10 @@ export function healExamNavHidden(user: any): any {
   return changed ? { ...user, navHidden } : user;
 }
 
+/**
+ * Пишет производную от переданного user — вызывать под withUserLock
+ * (src/lib/userLock.ts) со свежепрочитанным пользователем.
+ */
 export async function maybeExpirePreviewUser(
   redis: { get: (k: string) => Promise<any>; set: (k: string, v: any) => Promise<any> },
   tgId: string,

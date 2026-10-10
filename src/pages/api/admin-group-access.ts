@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
 import { SUBJECTS } from '@/lib/subjects';
 import { verifyAdminRequest } from '@/lib/adminAuth';
+import { updateUser } from '@/lib/userLock';
 import { getAllUserIds, registerUserId } from '@/lib/userIndex';
 import { healUserFacultyFields } from '@/lib/facultyCodes';
 import { normalizeStudyGroup, buildStudyGroupFromDigits } from '@/lib/studyGroup';
@@ -23,10 +24,23 @@ import { loadGroupCatalogOverlay } from '@/lib/groupCatalog';
 
 const redis = createRedisFromEnv();
 
-async function saveUser(tgId: string, data: unknown) {
-  const { user: healed } = healUserFacultyFields(data as Record<string, unknown>);
-  await redis.set(`user_id:${tgId}`, healed);
-  await registerUserId(redis, tgId);
+type GroupAccessRules = Awaited<ReturnType<typeof loadGroupAccessRules>>;
+
+/**
+ * Под блокировкой пользователя перечитать его и применить правила к свежей
+ * копии — иначе запись из цикла могла затереть параллельное изменение.
+ */
+async function persistGroupAccess(tgId: string, rules: GroupAccessRules): Promise<boolean> {
+  let changed = false;
+  await updateUser<Record<string, unknown>>(redis, tgId, fresh => {
+    if (!fresh || typeof fresh !== 'object') return fresh;
+    const applied = applyGroupAccessToUser(fresh, rules);
+    if (!applied.changed) return fresh;
+    changed = true;
+    return healUserFacultyFields(applied.user).user;
+  });
+  if (changed) await registerUserId(redis, tgId);
+  return changed;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -222,9 +236,7 @@ async function syncUsersForRule(
     const user = raw as Record<string, unknown>;
     if (String(user.facultyId || '') !== facultyId) continue;
     if (normalizeStudyGroup(String(user.studyGroup || '')) !== target) continue;
-    const { user: patched, changed } = applyGroupAccessToUser(user, rules);
-    if (changed) {
-      await saveUser(id, patched);
+    if (applyGroupAccessToUser(user, rules).changed && await persistGroupAccess(id, rules)) {
       synced++;
     }
   }
@@ -245,9 +257,7 @@ async function syncUsersForStudyGroups(
     const user = raw as Record<string, unknown>;
     if (String(user.facultyId || '') !== facultyId) continue;
     if (!targets.has(normalizeStudyGroup(String(user.studyGroup || '')))) continue;
-    const { user: patched, changed } = applyGroupAccessToUser(user, rules);
-    if (changed) {
-      await saveUser(id, patched);
+    if (applyGroupAccessToUser(user, rules).changed && await persistGroupAccess(id, rules)) {
       synced++;
     }
   }
@@ -294,9 +304,7 @@ async function syncAllUsers(
   for (const id of ids) {
     const raw: unknown = await redis.get(`user_id:${id}`);
     if (!raw || typeof raw !== 'object') continue;
-    const { user: patched, changed } = applyGroupAccessToUser(raw, rules);
-    if (changed) {
-      await saveUser(id, patched);
+    if (applyGroupAccessToUser(raw, rules).changed && await persistGroupAccess(id, rules)) {
       synced++;
     }
   }

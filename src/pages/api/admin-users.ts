@@ -29,6 +29,7 @@ import { applyGroupAccessToUser, loadGroupAccessRules } from '@/lib/groupAccess'
 import type { PreviewModule } from '@/lib/previewModules';
 import { clearAuthRateLimitsForTgId } from '@/lib/authRateLimit';
 import { verifyAdminRequest } from '@/lib/adminAuth';
+import { isUserLockTimeout, withUserLock } from '@/lib/userLock';
 import { getAllUserIds, registerUserId, removeUserId } from '@/lib/userIndex';
 import { isValidTelegramUsername, normalizeTelegramUsername } from '@/lib/tgLinks';
 import { resolveLastActivityIso } from '@/lib/userActivity';
@@ -267,7 +268,30 @@ async function buildUserList(ids: string[]) {
   });
 }
 
+/**
+ * Действие над одним пользователем выполняется под его блокировкой
+ * (src/lib/userLock.ts): чтение, правка и запись не перемешаются с
+ * параллельным запросом студента — подтверждение оплаты не затрётся.
+ * Блокировку берём только после проверки прав админа.
+ */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const { action, tgId } = req.body ?? {};
+  if (req.method !== 'POST' || !action || !tgId || action === 'gift_bio_tasks') {
+    return handleAdminUsers(req, res);
+  }
+  const auth = verifyAdminRequest(req);
+  if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+  try {
+    return await withUserLock(redis, String(tgId), () => handleAdminUsers(req, res));
+  } catch (e) {
+    if (isUserLockTimeout(e)) {
+      return res.status(503).json({ error: 'Студент сейчас что-то делает в приложении — повтори через пару секунд.' });
+    }
+    throw e;
+  }
+}
+
+async function handleAdminUsers(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end();
 
   const {
@@ -286,14 +310,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       for (const id of ids) {
         const raw: any = await redis.get(`user_id:${id}`);
         if (!raw) continue;
-        const user = ensureSubjects(raw);
-        const gifted = applyBioTasksGift(user);
-        if (!gifted) {
+        if (!applyBioTasksGift(ensureSubjects(raw))) {
           skipped++;
           continue;
         }
-        await saveUser(id, gifted);
-        updated++;
+        // Под блокировкой: подарок применяется к свежей копии пользователя.
+        let gifted = false;
+        await withUserLock(redis, id, async () => {
+          const fresh: any = await redis.get(`user_id:${id}`);
+          const next = fresh ? applyBioTasksGift(ensureSubjects(fresh)) : null;
+          if (next) {
+            await saveUser(id, next);
+            gifted = true;
+          }
+        });
+        if (gifted) updated++; else skipped++;
       }
       return res.status(200).json({
         ok: true,

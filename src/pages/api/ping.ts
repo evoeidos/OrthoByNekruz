@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
 import { touchUserVisit } from '@/lib/userActivity';
 import { resolveRequestIdentity } from '@/lib/resolveIdentity';
+import { updateUser } from '@/lib/userLock';
 
 const redis            = createRedisFromEnv();
 const BOT_TOKEN        = process.env.BOT_TOKEN    || '';
@@ -85,7 +86,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (count === 1) await redis.expire(actKey, 48 * 3600);
 
       if (userData && typeof userData === 'object') {
-        await redis.set(`user_id:${tgId}`, touchUserVisit(userData));
+        await updateUser(redis, tgId, fresh =>
+          fresh && typeof fresh === 'object' ? touchUserVisit(fresh) : fresh,
+        );
       }
 
       console.log(`[ping] userId=${tgId} opens=${count} limit=${DAILY_OPEN_LIMIT}`);
@@ -95,15 +98,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (!alreadyNotified) {
           await redis.set(notifiedKey, '1', { ex: 48 * 3600 });
 
-          const user: any = await redis.get(`user_id:${tgId}`);
-          if (user && typeof user === 'object') {
-            await redis.set(`user_id:${tgId}`, {
-              ...user,
-              blocked:       true,
-              blockedReason: 'activity',
-              blockedAt:     new Date().toISOString(),
-            });
-          }
+          await updateUser(redis, tgId, fresh =>
+            fresh && typeof fresh === 'object'
+              ? {
+                  ...fresh,
+                  blocked:       true,
+                  blockedReason: 'activity',
+                  blockedAt:     new Date().toISOString(),
+                }
+              : fresh,
+          );
 
           await notifyAdmin(tgId, count);
         } else {

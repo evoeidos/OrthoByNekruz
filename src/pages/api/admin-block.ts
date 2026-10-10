@@ -2,6 +2,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
 import { verifyAdminRequest } from '@/lib/adminAuth';
+import { updateUser } from '@/lib/userLock';
 
 const redis        = createRedisFromEnv();
 
@@ -22,8 +23,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     if (action === 'block') {
-      await redis.set(`user_id:${tgId}`, {
-        ...user,
+      await updateUser(redis, String(tgId), fresh => fresh && {
+        ...fresh,
         blocked:       true,
         blockedReason: 'manual',
         blockedAt:     new Date().toISOString(),
@@ -32,11 +33,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (action === 'unblock') {
-      const updated: Record<string, any> = { ...user };
-      delete updated.blocked;
-      delete updated.blockedReason;
-      delete updated.blockedAt;
-      await redis.set(`user_id:${tgId}`, updated);
+      await updateUser<Record<string, any>>(redis, String(tgId), fresh => {
+        if (!fresh) return fresh;
+        const updated = { ...fresh };
+        delete updated.blocked;
+        delete updated.blockedReason;
+        delete updated.blockedAt;
+        return updated;
+      });
       // Сбрасываем счётчик открытий — чистый старт
       const today = new Date().toISOString().slice(0, 10);
       await redis.del(`opens:${tgId}:${today}`);

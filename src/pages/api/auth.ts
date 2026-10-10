@@ -70,6 +70,7 @@ import {
 } from '@/lib/catalogBrowse';
 import { touchUserActivity, touchUserVisit } from '@/lib/userActivity';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
+import { isUserLockTimeout, withUserLock } from '@/lib/userLock';
 
 const redis = createRedisFromEnv();
 
@@ -269,7 +270,9 @@ async function isSubscribed(userId: number): Promise<boolean> {
   if (!BOT_TOKEN) return false;
   try {
     const url  = `https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=@${CHANNEL_USERNAME}&user_id=${userId}`;
-    const res  = await fetch(url);
+    // Таймаут обязателен: проверка идёт под блокировкой пользователя, а
+    // зависший api.telegram.org держал бы вход до бесконечности.
+    const res  = await fetch(url, { signal: AbortSignal.timeout(4000) });
     const data = await res.json();
     if (!data.ok) {
       console.error(`[isSubscribed] getChatMember failed for ${userId}:`, JSON.stringify(data));
@@ -496,606 +499,621 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
-  const ip = getIp(req);
-
-  let redisOk = true;
+  // Всё чтение-запись пользователя дальше — под блокировкой (src/lib/userLock.ts):
+  // иначе параллельный запрос мог затереть подтверждение оплаты админом.
   try {
-    let user: any = null;
-    try {
-      user = await redis.get(`user_id:${tgIdStr}`);
-    } catch (err) {
-      redisOk = false;
-      if (!isRedisUnavailableError(err)) throw err;
-      if (mode === 'check_subjects') {
-        return res.status(200).json({ degraded: true, registered: true });
-      }
-    }
-    if (typeof user === 'string') {
-      try { user = JSON.parse(user); } catch { user = null; }
-    }
-    user = ensureSubjectsField(user);
+    return await withUserLock(redis, tgIdStr, async () => {
+      const ip = getIp(req);
 
-    const isOwner = ADMIN_TG_ID && tgIdStr === ADMIN_TG_ID;
-    if (!isOwner && user?.blocked === true) {
-      return res.status(403).json({ error: 'Твой аккаунт заблокирован. Свяжись с администратором.', blocked: true });
-    }
-
-    if (isOwner || isPreviewShortDurationAccount(tgIdStr)) {
-      skipSubscriptionCheck = true;
-    }
-
-    if (!skipSubscriptionCheck) {
-      const inWhitelist = await redis.sismember('sub_whitelist', tgIdStr);
-      if (!inWhitelist) {
-        const subscribed = await isSubscribed(Number(tgIdStr));
-        if (!subscribed) {
-          return res.status(403).json({
-            error: `Подпишись на @${CHANNEL_USERNAME} для доступа.`,
-            needSubscription: true,
-          });
+      let redisOk = true;
+      try {
+        let user: any = null;
+        try {
+          user = await redis.get(`user_id:${tgIdStr}`);
+        } catch (err) {
+          redisOk = false;
+          if (!isRedisUnavailableError(err)) throw err;
+          if (mode === 'check_subjects') {
+            return res.status(200).json({ degraded: true, registered: true });
+          }
         }
-      }
-    }
-
-    if (mode === 'check_demo') {
-      return res.status(400).json({ error: 'Введи код из канала в поле выше.' });
-    }
-
-    if (mode === 'start_catalog_browse') {
-      if (!user) {
-        return res.status(401).json({ error: 'Сначала войди в приложение.' });
-      }
-      if (!isEstablishedAccount(user)) {
-        return res.status(403).json({ error: 'Каталог доступен после регистрации.' });
-      }
-      let promo = resolveUserFacultyPromo(user, key, req.body?.facultyId);
-      if (!promo) {
-        return res.status(400).json({
-          error: 'Введи код факультета из канала.',
-          needsFacultyCode: true,
-        });
-      }
-      const catalogLimit = await checkCatalogBrowseLimit(redis, ip, tgIdStr, 'success');
-      if (catalogLimit.blocked) {
-        return res.status(429).json({ error: 'Доступ временно заблокирован. Подожди 30 минут.' });
-      }
-      const profile = { username, firstName, lastName };
-      return handleCatalogBrowseStart(res, tgIdStr, user, profile, promo);
-    }
-
-    if (mode === 'exit_catalog_browse') {
-      if (!canExitCatalogBrowse(user)) {
-        return res.status(400).json({ error: 'Нельзя вернуться к купленному сейчас.' });
-      }
-      const updated = exitCatalogBrowse(user);
-      if (!updated) {
-        return res.status(400).json({ error: 'Не удалось вернуться к купленному.' });
-      }
-      updated.username   = username ?? updated.username;
-      updated.firstName  = firstName ?? updated.firstName;
-      updated.lastName   = lastName ?? updated.lastName;
-      updated.lastLogin  = new Date().toISOString();
-      updated.loginCount = Number(updated.loginCount || 0) + 1;
-      await saveUser(tgIdStr, updated);
-      return res.status(200).json({
-        success: true,
-        ...(await subjectsResponse(updated, tgIdStr)),
-      });
-    }
-
-    if (mode === 'set_faculty') {
-      if (!user) {
-        return res.status(401).json({ error: 'Сначала войди в приложение.' });
-      }
-      const facultyId = String(req.body?.facultyId || '').trim();
-      const promo = getFacultyPromoById(facultyId);
-      if (!promo) {
-        return res.status(400).json({ error: 'Неизвестный факультет.' });
-      }
-      let updated = applyFacultyToUser(
-        touchUserVisit({ ...user, username, firstName, lastName }),
-        promo,
-      );
-      const withBioTasks = ensureStomatologyBioTasksVisible(updated);
-      if (withBioTasks) updated = withBioTasks;
-      const withPedBioTasks = ensurePedTherBioTasksVisible(updated);
-      if (withPedBioTasks) updated = withPedBioTasks;
-      const withChemTasks = ensurePedTherChemTasksVisible(updated);
-      if (withChemTasks) updated = withChemTasks;
-      await saveUser(tgIdStr, updated);
-      return res.status(200).json(await subjectsResponse(updated, tgIdStr));
-    }
-
-    if (mode === 'set_study_group') {
-      const canSetGroup = user && (
-        user.previewStatus === 'selecting'
-        || user.previewStatus === 'active'
-        || user.previewStatus === 'expired'
-      );
-      if (!canSetGroup) {
-        return res.status(400).json({ error: 'Сейчас нельзя сохранить группу.' });
-      }
-      const facultyId = String(user.facultyId || '').trim() || null;
-      const built = buildStudyGroupFromDigits(String(studyGroupRaw ?? ''), facultyId);
-      if (!built) {
-        return res.status(400).json({
-          error: facultyId
-            ? 'Введи номер группы цифрами, например 108'
-            : 'Сначала введи код доступа.',
-        });
-      }
-      const updated = {
-        ...user,
-        studyGroup: normalizeStudyGroup(built),
-        username:   username ?? user.username,
-        firstName:  firstName ?? user.firstName,
-        lastName:   lastName ?? user.lastName,
-        lastLogin:  new Date().toISOString(),
-        loginCount: Number(user.loginCount || 0) + 1,
-      };
-      const resumed = resumePreviewTrialAfterGroup(updated) ?? updated;
-      const merged = await mergeGroupAccess(resumed);
-      const withGroup = merged.user;
-      await saveUser(tgIdStr, touchUserActivity(withGroup));
-      return res.status(200).json({
-        success: true,
-        ...(await subjectsResponse(withGroup, tgIdStr)),
-      });
-    }
-
-    if (mode === 'dismiss_group_access_hint') {
-      if (!user) return res.status(404).json({ error: 'User not found' });
-      const dismissed = dismissGroupAccessHint(user);
-      if (dismissed.changed) {
-        await saveUser(tgIdStr, touchUserActivity(dismissed.user));
-      }
-      return res.status(200).json({
-        success: true,
-        ...(await subjectsResponse(dismissed.user, tgIdStr)),
-      });
-    }
-
-    if (mode === 'pick_preview_subject') {
-      if (!user || user.previewStatus !== 'selecting') {
-        return res.status(400).json({ error: 'Выбор предмета недоступен.' });
-      }
-      if (!String(user.studyGroup || '').trim()) {
-        return res.status(400).json({
-          error: 'Сначала укажи номер группы.',
-          needsStudyGroup: true,
-        });
-      }
-
-      const chosen = String(subjectId || '').trim();
-      const lockedSubject = String(user.previewChosenSubject || '').trim();
-      if (lockedSubject && lockedSubject !== chosen) {
-        return res.status(400).json({ error: 'Предмет уже выбран и изменить его нельзя.' });
-      }
-      const subjectToUse = lockedSubject || chosen;
-
-      if (!getSubject(subjectToUse)) {
-        return res.status(400).json({ error: 'Неизвестный предмет.' });
-      }
-
-      const catalogEntry = (await buildPreviewSubjectCatalog(redis)).find(s => s.id === subjectToUse);
-      if (!catalogEntry?.hasAnyModule) {
-        return res.status(400).json({ error: 'Для этого предмета материалы ещё не готовы.' });
-      }
-
-      const chosenModules = normalizePreviewModules(modules);
-      if (chosenModules.length === 0) {
-        return res.status(400).json({ error: 'Выбери хотя бы один раздел.' });
-      }
-      for (const modId of chosenModules) {
-        const mod = catalogEntry.modules.find(m => m.id === modId);
-        if (!mod?.available) {
-          return res.status(400).json({ error: 'Один из разделов недоступен.' });
+        if (typeof user === 'string') {
+          try { user = JSON.parse(user); } catch { user = null; }
         }
-      }
+        user = ensureSubjectsField(user);
 
-      if (user._catalogBrowse) {
-        const granted = getCatalogGrantedSubjects(user);
-        const navHiddenMap = (user.navHidden && typeof user.navHidden === 'object')
-          ? user.navHidden as Record<string, string[]>
-          : {};
-        for (const modId of chosenModules) {
-          if (isCatalogModuleAlreadyGranted(subjectToUse, modId, granted, navHiddenMap)) {
+        const isOwner = ADMIN_TG_ID && tgIdStr === ADMIN_TG_ID;
+        if (!isOwner && user?.blocked === true) {
+          return res.status(403).json({ error: 'Твой аккаунт заблокирован. Свяжись с администратором.', blocked: true });
+        }
+
+        if (isOwner || isPreviewShortDurationAccount(tgIdStr)) {
+          skipSubscriptionCheck = true;
+        }
+
+        if (!skipSubscriptionCheck) {
+          const inWhitelist = await redis.sismember('sub_whitelist', tgIdStr);
+          if (!inWhitelist) {
+            const subscribed = await isSubscribed(Number(tgIdStr));
+            if (!subscribed) {
+              return res.status(403).json({
+                error: `Подпишись на @${CHANNEL_USERNAME} для доступа.`,
+                needSubscription: true,
+              });
+            }
+          }
+        }
+
+        if (mode === 'check_demo') {
+          return res.status(400).json({ error: 'Введи код из канала в поле выше.' });
+        }
+
+        if (mode === 'start_catalog_browse') {
+          if (!user) {
+            return res.status(401).json({ error: 'Сначала войди в приложение.' });
+          }
+          if (!isEstablishedAccount(user)) {
+            return res.status(403).json({ error: 'Каталог доступен после регистрации.' });
+          }
+          let promo = resolveUserFacultyPromo(user, key, req.body?.facultyId);
+          if (!promo) {
             return res.status(400).json({
-              error: 'Этот раздел уже открыт. Выбери другой для докупки.',
+              error: 'Введи код факультета из канала.',
+              needsFacultyCode: true,
             });
           }
-        }
-      } else if (
-        !isPreviewShortDurationAccount(tgIdStr)
-        && userAlreadyHasAllChosenModules(user, subjectToUse, chosenModules)
-      ) {
-        const updated = recordFacultyChoiceOnly(user, subjectToUse, chosenModules);
-        updated.username   = username ?? updated.username;
-        updated.firstName  = firstName ?? updated.firstName;
-        updated.lastName   = lastName ?? updated.lastName;
-        updated.lastLogin  = new Date().toISOString();
-        updated.loginCount = Number(updated.loginCount || 0) + 1;
-        await saveUser(tgIdStr, updated);
-        return res.status(200).json({
-          success: true,
-          facultyRecorded: true,
-          ...(await subjectsResponse(updated, tgIdStr)),
-        });
-      }
-
-      const isCatalogAddon = user._catalogBrowse === true
-        && userAlreadyHasSubjectAccess(user, subjectToUse);
-      const updated = buildActivePreviewUser(user, subjectToUse, chosenModules, {
-        catalogAddon: isCatalogAddon,
-      });
-      if (user._catalogBrowse) {
-        updated._catalogBrowse = true;
-      }
-      updated.username   = username ?? updated.username;
-      updated.firstName  = firstName ?? updated.firstName;
-      updated.lastName   = lastName ?? updated.lastName;
-      updated.lastLogin  = new Date().toISOString();
-      updated.loginCount = Number(updated.loginCount || 0) + 1;
-
-      await saveUser(tgIdStr, updated);
-
-      return res.status(200).json({
-        success: true,
-        ...(await subjectsResponse(updated, tgIdStr)),
-      });
-    }
-
-    if (mode === 'sync_preview_active') {
-      if (!user) {
-        return res.status(200).json({ success: true, ...(await subjectsResponse(user, tgIdStr)) });
-      }
-      const deltaMs = Number(req.body?.deltaMs);
-      const moduleRaw = String(req.body?.module || '').trim();
-      const activeModule = (['questions', 'tests', 'tasks'] as PreviewModule[]).includes(moduleRaw as PreviewModule)
-        ? moduleRaw as PreviewModule
-        : null;
-      let updated = syncPreviewActiveMs(user, activeModule, deltaMs, tgIdStr);
-      if (updated !== user) {
-        await saveUser(tgIdStr, updated);
-      }
-      updated = await maybeExpirePreviewUser(redis, tgIdStr, updated);
-      return res.status(200).json({
-        success: true,
-        ...(await subjectsResponse(updated, tgIdStr)),
-      });
-    }
-
-    if (mode === 'abandon_pending_preview') {
-      if (!user?.previewChosenSubject) {
-        return res.status(400).json({ error: 'Нет незавершённой заявки.' });
-      }
-      if (user.receiptClaimedAt) {
-        return res.status(400).json({ error: 'После отправки чека отменить нельзя.' });
-      }
-      user = await maybeExpirePreviewUser(redis, tgIdStr, user);
-      if (!canAbandonPendingPreview(user)) {
-        return res.status(400).json({ error: 'Нет открытых предметов для возврата.' });
-      }
-      const updated = abandonPendingPreviewPayment(user);
-      if (!updated) {
-        return res.status(400).json({ error: 'Не удалось отменить заявку.' });
-      }
-      updated.username   = username ?? updated.username;
-      updated.firstName  = firstName ?? updated.firstName;
-      updated.lastName   = lastName ?? updated.lastName;
-      updated.lastLogin  = new Date().toISOString();
-      updated.loginCount = Number(updated.loginCount || 0) + 1;
-      await saveUser(tgIdStr, updated);
-      return res.status(200).json({
-        success: true,
-        abandonedPreview: true,
-        ...(await subjectsResponse(updated, tgIdStr)),
-      });
-    }
-
-    if (mode === 'update_preview_payment_subject') {
-      if (!user?.previewChosenSubject) {
-        return res.status(400).json({ error: 'Заявка не найдена.' });
-      }
-      if (user.receiptClaimedAt) {
-        return res.status(400).json({ error: 'После отправки чека предмет изменить нельзя.' });
-      }
-      const nextSubject = String(subjectId || '').trim();
-      if (!getSubject(nextSubject)) {
-        return res.status(400).json({ error: 'Неизвестный предмет.' });
-      }
-      user = await maybeExpirePreviewUser(redis, tgIdStr, user);
-      const moduleList = normalizePreviewModules(modules);
-      const switched = switchPreviewPaymentSubject(
-        user,
-        nextSubject,
-        moduleList.length > 0 ? moduleList : undefined,
-      );
-      if (!switched) {
-        return res.status(400).json({ error: 'Для этого предмета нечего докупить.' });
-      }
-      const healedSwitch = applyModuleTrialExpiries(switched, tgIdStr) ?? switched;
-      await saveUser(tgIdStr, touchUserActivity(healedSwitch));
-      return res.status(200).json({
-        success: true,
-        ...(await subjectsResponse(healedSwitch, tgIdStr)),
-      });
-    }
-
-    if (mode === 'update_preview_payment_choice') {
-      if (!user?.previewChosenSubject) {
-        return res.status(400).json({ error: 'Заявка не найдена.' });
-      }
-      if (user.receiptClaimedAt) {
-        return res.status(400).json({ error: 'После отправки чека выбор изменить нельзя.' });
-      }
-      user = await maybeExpirePreviewUser(redis, tgIdStr, user);
-      let updated = updatePreviewPaymentChoice(user, normalizePreviewModules(modules));
-      if (!updated) {
-        return res.status(400).json({ error: 'Выбери хотя бы один раздел.' });
-      }
-      updated = applyModuleTrialExpiries(updated, tgIdStr) ?? updated;
-      await saveUser(tgIdStr, touchUserActivity(updated));
-      return res.status(200).json({
-        success: true,
-        ...(await subjectsResponse(updated, tgIdStr)),
-      });
-    }
-
-    if (mode === 'claim_preview_receipt') {
-      if (!user?.previewChosenSubject) {
-        return res.status(400).json({ error: 'Заявка не найдена.' });
-      }
-      if (!String(user.studyGroup || '').trim()) {
-        return res.status(400).json({
-          error: 'Укажи номер группы перед отправкой чека.',
-          needsStudyGroup: true,
-        });
-      }
-      user = await maybeExpirePreviewUser(redis, tgIdStr, user);
-      const claimModules = normalizePreviewModules(modules);
-      const updated = claimPreviewReceipt(user, claimModules.length > 0 ? claimModules : undefined);
-      if (!updated) return res.status(400).json({ error: 'Не удалось сохранить.' });
-      await saveUser(tgIdStr, touchUserActivity(updated));
-      const notifiedModules = claimModules.length > 0
-        ? claimModules
-        : (['questions', 'tests', 'tasks'] as const).filter(
-            m => updated.previewModuleStatuses?.[m] === 'receipt_pending',
-          );
-      void notifyAdminReceiptClaimed({
-        tgId:       tgIdStr,
-        firstName,
-        lastName,
-        username,
-        subjectId:  String(updated.previewChosenSubject),
-        modules:    notifiedModules,
-      });
-      return res.status(200).json({
-        success: true,
-        receiptClaimed: true,
-        awaitingAdmin: true,
-        accessGranted: hasFinalizedPreviewAccess(updated)
-          || updated.subjects?.[updated.previewChosenSubject] === true,
-        ...(await subjectsResponse(updated, tgIdStr)),
-      });
-    }
-
-    if (mode === 'check_preview_status') {
-      if (!user?.previewStatus && !hasFinalizedPreviewAccess(user) && !user?.receiptClaimedAt) {
-        return res.status(404).json({ error: 'Заявка не найдена.' });
-      }
-      user = await maybeExpirePreviewUser(redis, tgIdStr, user);
-      const healedPreview = await healAndMaybePersistUser(tgIdStr, user, redisOk);
-      user = healedPreview.user;
-      const catalog = await buildPreviewSubjectCatalog(redis);
-      if (hasFinalizedPreviewAccess(user)) {
-        return res.status(200).json({
-          success: true,
-          ...(await subjectsResponse(user, tgIdStr, { accessHealed: healedPreview.accessHealed })),
-        });
-      }
-      if (user.receiptClaimedAt) {
-        return res.status(200).json({
-          success: true,
-          awaitingAdmin: true,
-          receiptClaimed: true,
-          ...previewPayload(user, catalog, tgIdStr),
-        });
-      }
-      if (user.previewStatus === 'expired') {
-        return res.status(200).json({ success: true, awaitingAdmin: true, ...previewPayload(user, catalog, tgIdStr) });
-      }
-      if (user.previewStatus === 'selecting') {
-        return res.status(200).json({ success: true, needsSubjectPick: true, ...previewPayload(user, catalog, tgIdStr) });
-      }
-      if (user.previewStatus === 'active') {
-        return res.status(200).json({
-          success: true,
-          ...(await subjectsResponse(user, tgIdStr)),
-        });
-      }
-      return res.status(404).json({ error: 'Статус не определён.' });
-    }
-
-    if (mode === 'check_micro') {
-      const userSubjects = getEffectiveUserSubjects(user, tgIdStr);
-      return res.status(200).json({ hasMicro: userSubjects.includes('micro') });
-    }
-
-    if (mode === 'check_subjects') {
-      if (!user) {
-        if (!redisOk) {
-          return res.status(200).json({ degraded: true, registered: true });
-        }
-        return res.status(200).json({ subjects: [], navHidden: {}, registered: false });
-      }
-
-      if (redisOk) {
-        user = await maybeExpirePreviewUser(redis, tgIdStr, user);
-      }
-      const healedCheck = await healAndMaybePersistUser(tgIdStr, user, redisOk);
-
-      return res.status(200).json(await subjectsResponse(
-        healedCheck.user,
-        tgIdStr,
-        { accessHealed: healedCheck.accessHealed },
-      ));
-    }
-
-    if (user && !user.trial_until && !user.previewStatus) {
-      await redis.set(`user_id:${tgIdStr}`, {
-        ...user,
-        username,
-        firstName,
-        lastName,
-        _migrated_subjects: true,
-        lastLogin:  new Date().toISOString(),
-        loginCount: ((user as any).loginCount || 0) + 1,
-      });
-      await registerUserId(redis, tgIdStr);
-      await resetRateLimit(ip, tgIdStr);
-
-      const userSubjects = getUserAvailableSubjects(user);
-      return res.status(200).json({
-        success:  true,
-        subjects: userSubjects,
-        hasMicro: userSubjects.includes('micro'),
-      });
-    }
-
-    if (TRIAL_DAYS > 0) {
-      const now = new Date();
-      if (!user && !key) {
-        const trialUntil = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
-        const newUser = {
-          activatedKey: 'trial',
-          date:         now.toISOString(),
-          trial_until:  trialUntil.toISOString(),
-          username, firstName, lastName,
-          subjects:     createDefaultSubjects(),
-          _migrated_subjects: true,
-        };
-        await redis.set(`user_id:${tgIdStr}`, newUser);
-        await registerUserId(redis, tgIdStr);
-
-        const userSubjects = getUserAvailableSubjects(newUser);
-        return res.status(200).json({
-          success:  true,
-          trial:    true,
-          trialUntil,
-          subjects: userSubjects,
-          hasMicro: false,
-        });
-      }
-      if (user?.trial_until) {
-        const trialEnd = new Date(user.trial_until);
-        if (now < trialEnd) {
-          if (username !== user.username) {
-            await redis.set(`user_id:${tgIdStr}`, { ...user, username, firstName, lastName });
-            await registerUserId(redis, tgIdStr);
+          const catalogLimit = await checkCatalogBrowseLimit(redis, ip, tgIdStr, 'success');
+          if (catalogLimit.blocked) {
+            return res.status(429).json({ error: 'Доступ временно заблокирован. Подожди 30 минут.' });
           }
+          const profile = { username, firstName, lastName };
+          return handleCatalogBrowseStart(res, tgIdStr, user, profile, promo);
+        }
+
+        if (mode === 'exit_catalog_browse') {
+          if (!canExitCatalogBrowse(user)) {
+            return res.status(400).json({ error: 'Нельзя вернуться к купленному сейчас.' });
+          }
+          const updated = exitCatalogBrowse(user);
+          if (!updated) {
+            return res.status(400).json({ error: 'Не удалось вернуться к купленному.' });
+          }
+          updated.username   = username ?? updated.username;
+          updated.firstName  = firstName ?? updated.firstName;
+          updated.lastName   = lastName ?? updated.lastName;
+          updated.lastLogin  = new Date().toISOString();
+          updated.loginCount = Number(updated.loginCount || 0) + 1;
+          await saveUser(tgIdStr, updated);
+          return res.status(200).json({
+            success: true,
+            ...(await subjectsResponse(updated, tgIdStr)),
+          });
+        }
+
+        if (mode === 'set_faculty') {
+          if (!user) {
+            return res.status(401).json({ error: 'Сначала войди в приложение.' });
+          }
+          const facultyId = String(req.body?.facultyId || '').trim();
+          const promo = getFacultyPromoById(facultyId);
+          if (!promo) {
+            return res.status(400).json({ error: 'Неизвестный факультет.' });
+          }
+          let updated = applyFacultyToUser(
+            touchUserVisit({ ...user, username, firstName, lastName }),
+            promo,
+          );
+          const withBioTasks = ensureStomatologyBioTasksVisible(updated);
+          if (withBioTasks) updated = withBioTasks;
+          const withPedBioTasks = ensurePedTherBioTasksVisible(updated);
+          if (withPedBioTasks) updated = withPedBioTasks;
+          const withChemTasks = ensurePedTherChemTasksVisible(updated);
+          if (withChemTasks) updated = withChemTasks;
+          await saveUser(tgIdStr, updated);
+          return res.status(200).json(await subjectsResponse(updated, tgIdStr));
+        }
+
+        if (mode === 'set_study_group') {
+          const canSetGroup = user && (
+            user.previewStatus === 'selecting'
+            || user.previewStatus === 'active'
+            || user.previewStatus === 'expired'
+          );
+          if (!canSetGroup) {
+            return res.status(400).json({ error: 'Сейчас нельзя сохранить группу.' });
+          }
+          const facultyId = String(user.facultyId || '').trim() || null;
+          const built = buildStudyGroupFromDigits(String(studyGroupRaw ?? ''), facultyId);
+          if (!built) {
+            return res.status(400).json({
+              error: facultyId
+                ? 'Введи номер группы цифрами, например 108'
+                : 'Сначала введи код доступа.',
+            });
+          }
+          const updated = {
+            ...user,
+            studyGroup: normalizeStudyGroup(built),
+            username:   username ?? user.username,
+            firstName:  firstName ?? user.firstName,
+            lastName:   lastName ?? user.lastName,
+            lastLogin:  new Date().toISOString(),
+            loginCount: Number(user.loginCount || 0) + 1,
+          };
+          const resumed = resumePreviewTrialAfterGroup(updated) ?? updated;
+          const merged = await mergeGroupAccess(resumed);
+          const withGroup = merged.user;
+          await saveUser(tgIdStr, touchUserActivity(withGroup));
+          return res.status(200).json({
+            success: true,
+            ...(await subjectsResponse(withGroup, tgIdStr)),
+          });
+        }
+
+        if (mode === 'dismiss_group_access_hint') {
+          if (!user) return res.status(404).json({ error: 'User not found' });
+          const dismissed = dismissGroupAccessHint(user);
+          if (dismissed.changed) {
+            await saveUser(tgIdStr, touchUserActivity(dismissed.user));
+          }
+          return res.status(200).json({
+            success: true,
+            ...(await subjectsResponse(dismissed.user, tgIdStr)),
+          });
+        }
+
+        if (mode === 'pick_preview_subject') {
+          if (!user || user.previewStatus !== 'selecting') {
+            return res.status(400).json({ error: 'Выбор предмета недоступен.' });
+          }
+          if (!String(user.studyGroup || '').trim()) {
+            return res.status(400).json({
+              error: 'Сначала укажи номер группы.',
+              needsStudyGroup: true,
+            });
+          }
+
+          const chosen = String(subjectId || '').trim();
+          const lockedSubject = String(user.previewChosenSubject || '').trim();
+          if (lockedSubject && lockedSubject !== chosen) {
+            return res.status(400).json({ error: 'Предмет уже выбран и изменить его нельзя.' });
+          }
+          const subjectToUse = lockedSubject || chosen;
+
+          if (!getSubject(subjectToUse)) {
+            return res.status(400).json({ error: 'Неизвестный предмет.' });
+          }
+
+          const catalogEntry = (await buildPreviewSubjectCatalog(redis)).find(s => s.id === subjectToUse);
+          if (!catalogEntry?.hasAnyModule) {
+            return res.status(400).json({ error: 'Для этого предмета материалы ещё не готовы.' });
+          }
+
+          const chosenModules = normalizePreviewModules(modules);
+          if (chosenModules.length === 0) {
+            return res.status(400).json({ error: 'Выбери хотя бы один раздел.' });
+          }
+          for (const modId of chosenModules) {
+            const mod = catalogEntry.modules.find(m => m.id === modId);
+            if (!mod?.available) {
+              return res.status(400).json({ error: 'Один из разделов недоступен.' });
+            }
+          }
+
+          if (user._catalogBrowse) {
+            const granted = getCatalogGrantedSubjects(user);
+            const navHiddenMap = (user.navHidden && typeof user.navHidden === 'object')
+              ? user.navHidden as Record<string, string[]>
+              : {};
+            for (const modId of chosenModules) {
+              if (isCatalogModuleAlreadyGranted(subjectToUse, modId, granted, navHiddenMap)) {
+                return res.status(400).json({
+                  error: 'Этот раздел уже открыт. Выбери другой для докупки.',
+                });
+              }
+            }
+          } else if (
+            !isPreviewShortDurationAccount(tgIdStr)
+            && userAlreadyHasAllChosenModules(user, subjectToUse, chosenModules)
+          ) {
+            const updated = recordFacultyChoiceOnly(user, subjectToUse, chosenModules);
+            updated.username   = username ?? updated.username;
+            updated.firstName  = firstName ?? updated.firstName;
+            updated.lastName   = lastName ?? updated.lastName;
+            updated.lastLogin  = new Date().toISOString();
+            updated.loginCount = Number(updated.loginCount || 0) + 1;
+            await saveUser(tgIdStr, updated);
+            return res.status(200).json({
+              success: true,
+              facultyRecorded: true,
+              ...(await subjectsResponse(updated, tgIdStr)),
+            });
+          }
+
+          const isCatalogAddon = user._catalogBrowse === true
+            && userAlreadyHasSubjectAccess(user, subjectToUse);
+          const updated = buildActivePreviewUser(user, subjectToUse, chosenModules, {
+            catalogAddon: isCatalogAddon,
+          });
+          if (user._catalogBrowse) {
+            updated._catalogBrowse = true;
+          }
+          updated.username   = username ?? updated.username;
+          updated.firstName  = firstName ?? updated.firstName;
+          updated.lastName   = lastName ?? updated.lastName;
+          updated.lastLogin  = new Date().toISOString();
+          updated.loginCount = Number(updated.loginCount || 0) + 1;
+
+          await saveUser(tgIdStr, updated);
+
+          return res.status(200).json({
+            success: true,
+            ...(await subjectsResponse(updated, tgIdStr)),
+          });
+        }
+
+        if (mode === 'sync_preview_active') {
+          if (!user) {
+            return res.status(200).json({ success: true, ...(await subjectsResponse(user, tgIdStr)) });
+          }
+          const deltaMs = Number(req.body?.deltaMs);
+          const moduleRaw = String(req.body?.module || '').trim();
+          const activeModule = (['questions', 'tests', 'tasks'] as PreviewModule[]).includes(moduleRaw as PreviewModule)
+            ? moduleRaw as PreviewModule
+            : null;
+          let updated = syncPreviewActiveMs(user, activeModule, deltaMs, tgIdStr);
+          if (updated !== user) {
+            await saveUser(tgIdStr, updated);
+          }
+          updated = await maybeExpirePreviewUser(redis, tgIdStr, updated);
+          return res.status(200).json({
+            success: true,
+            ...(await subjectsResponse(updated, tgIdStr)),
+          });
+        }
+
+        if (mode === 'abandon_pending_preview') {
+          if (!user?.previewChosenSubject) {
+            return res.status(400).json({ error: 'Нет незавершённой заявки.' });
+          }
+          if (user.receiptClaimedAt) {
+            return res.status(400).json({ error: 'После отправки чека отменить нельзя.' });
+          }
+          user = await maybeExpirePreviewUser(redis, tgIdStr, user);
+          if (!canAbandonPendingPreview(user)) {
+            return res.status(400).json({ error: 'Нет открытых предметов для возврата.' });
+          }
+          const updated = abandonPendingPreviewPayment(user);
+          if (!updated) {
+            return res.status(400).json({ error: 'Не удалось отменить заявку.' });
+          }
+          updated.username   = username ?? updated.username;
+          updated.firstName  = firstName ?? updated.firstName;
+          updated.lastName   = lastName ?? updated.lastName;
+          updated.lastLogin  = new Date().toISOString();
+          updated.loginCount = Number(updated.loginCount || 0) + 1;
+          await saveUser(tgIdStr, updated);
+          return res.status(200).json({
+            success: true,
+            abandonedPreview: true,
+            ...(await subjectsResponse(updated, tgIdStr)),
+          });
+        }
+
+        if (mode === 'update_preview_payment_subject') {
+          if (!user?.previewChosenSubject) {
+            return res.status(400).json({ error: 'Заявка не найдена.' });
+          }
+          if (user.receiptClaimedAt) {
+            return res.status(400).json({ error: 'После отправки чека предмет изменить нельзя.' });
+          }
+          const nextSubject = String(subjectId || '').trim();
+          if (!getSubject(nextSubject)) {
+            return res.status(400).json({ error: 'Неизвестный предмет.' });
+          }
+          user = await maybeExpirePreviewUser(redis, tgIdStr, user);
+          const moduleList = normalizePreviewModules(modules);
+          const switched = switchPreviewPaymentSubject(
+            user,
+            nextSubject,
+            moduleList.length > 0 ? moduleList : undefined,
+          );
+          if (!switched) {
+            return res.status(400).json({ error: 'Для этого предмета нечего докупить.' });
+          }
+          const healedSwitch = applyModuleTrialExpiries(switched, tgIdStr) ?? switched;
+          await saveUser(tgIdStr, touchUserActivity(healedSwitch));
+          return res.status(200).json({
+            success: true,
+            ...(await subjectsResponse(healedSwitch, tgIdStr)),
+          });
+        }
+
+        if (mode === 'update_preview_payment_choice') {
+          if (!user?.previewChosenSubject) {
+            return res.status(400).json({ error: 'Заявка не найдена.' });
+          }
+          if (user.receiptClaimedAt) {
+            return res.status(400).json({ error: 'После отправки чека выбор изменить нельзя.' });
+          }
+          user = await maybeExpirePreviewUser(redis, tgIdStr, user);
+          let updated = updatePreviewPaymentChoice(user, normalizePreviewModules(modules));
+          if (!updated) {
+            return res.status(400).json({ error: 'Выбери хотя бы один раздел.' });
+          }
+          updated = applyModuleTrialExpiries(updated, tgIdStr) ?? updated;
+          await saveUser(tgIdStr, touchUserActivity(updated));
+          return res.status(200).json({
+            success: true,
+            ...(await subjectsResponse(updated, tgIdStr)),
+          });
+        }
+
+        if (mode === 'claim_preview_receipt') {
+          if (!user?.previewChosenSubject) {
+            return res.status(400).json({ error: 'Заявка не найдена.' });
+          }
+          if (!String(user.studyGroup || '').trim()) {
+            return res.status(400).json({
+              error: 'Укажи номер группы перед отправкой чека.',
+              needsStudyGroup: true,
+            });
+          }
+          user = await maybeExpirePreviewUser(redis, tgIdStr, user);
+          const claimModules = normalizePreviewModules(modules);
+          const updated = claimPreviewReceipt(user, claimModules.length > 0 ? claimModules : undefined);
+          if (!updated) return res.status(400).json({ error: 'Не удалось сохранить.' });
+          await saveUser(tgIdStr, touchUserActivity(updated));
+          const notifiedModules = claimModules.length > 0
+            ? claimModules
+            : (['questions', 'tests', 'tasks'] as const).filter(
+                m => updated.previewModuleStatuses?.[m] === 'receipt_pending',
+              );
+          void notifyAdminReceiptClaimed({
+            tgId:       tgIdStr,
+            firstName,
+            lastName,
+            username,
+            subjectId:  String(updated.previewChosenSubject),
+            modules:    notifiedModules,
+          });
+          return res.status(200).json({
+            success: true,
+            receiptClaimed: true,
+            awaitingAdmin: true,
+            accessGranted: hasFinalizedPreviewAccess(updated)
+              || updated.subjects?.[updated.previewChosenSubject] === true,
+            ...(await subjectsResponse(updated, tgIdStr)),
+          });
+        }
+
+        if (mode === 'check_preview_status') {
+          if (!user?.previewStatus && !hasFinalizedPreviewAccess(user) && !user?.receiptClaimedAt) {
+            return res.status(404).json({ error: 'Заявка не найдена.' });
+          }
+          user = await maybeExpirePreviewUser(redis, tgIdStr, user);
+          const healedPreview = await healAndMaybePersistUser(tgIdStr, user, redisOk);
+          user = healedPreview.user;
+          const catalog = await buildPreviewSubjectCatalog(redis);
+          if (hasFinalizedPreviewAccess(user)) {
+            return res.status(200).json({
+              success: true,
+              ...(await subjectsResponse(user, tgIdStr, { accessHealed: healedPreview.accessHealed })),
+            });
+          }
+          if (user.receiptClaimedAt) {
+            return res.status(200).json({
+              success: true,
+              awaitingAdmin: true,
+              receiptClaimed: true,
+              ...previewPayload(user, catalog, tgIdStr),
+            });
+          }
+          if (user.previewStatus === 'expired') {
+            return res.status(200).json({ success: true, awaitingAdmin: true, ...previewPayload(user, catalog, tgIdStr) });
+          }
+          if (user.previewStatus === 'selecting') {
+            return res.status(200).json({ success: true, needsSubjectPick: true, ...previewPayload(user, catalog, tgIdStr) });
+          }
+          if (user.previewStatus === 'active') {
+            return res.status(200).json({
+              success: true,
+              ...(await subjectsResponse(user, tgIdStr)),
+            });
+          }
+          return res.status(404).json({ error: 'Статус не определён.' });
+        }
+
+        if (mode === 'check_micro') {
+          const userSubjects = getEffectiveUserSubjects(user, tgIdStr);
+          return res.status(200).json({ hasMicro: userSubjects.includes('micro') });
+        }
+
+        if (mode === 'check_subjects') {
+          if (!user) {
+            if (!redisOk) {
+              return res.status(200).json({ degraded: true, registered: true });
+            }
+            return res.status(200).json({ subjects: [], navHidden: {}, registered: false });
+          }
+
+          if (redisOk) {
+            user = await maybeExpirePreviewUser(redis, tgIdStr, user);
+          }
+          const healedCheck = await healAndMaybePersistUser(tgIdStr, user, redisOk);
+
+          return res.status(200).json(await subjectsResponse(
+            healedCheck.user,
+            tgIdStr,
+            { accessHealed: healedCheck.accessHealed },
+          ));
+        }
+
+        if (user && !user.trial_until && !user.previewStatus) {
+          await redis.set(`user_id:${tgIdStr}`, {
+            ...user,
+            username,
+            firstName,
+            lastName,
+            _migrated_subjects: true,
+            lastLogin:  new Date().toISOString(),
+            loginCount: ((user as any).loginCount || 0) + 1,
+          });
+          await registerUserId(redis, tgIdStr);
+          await resetRateLimit(ip, tgIdStr);
+
           const userSubjects = getUserAvailableSubjects(user);
           return res.status(200).json({
             success:  true,
-            trial:    true,
-            trialUntil: trialEnd,
             subjects: userSubjects,
             hasMicro: userSubjects.includes('micro'),
           });
         }
-        if (!key) return res.status(401).json({ error: 'Пробный период истёк. Введи ключ.' });
-      }
-    }
 
-    if (!key) return res.status(401).json({ error: 'Введи код из канала или ключ доступа.' });
+        if (TRIAL_DAYS > 0) {
+          const now = new Date();
+          if (!user && !key) {
+            const trialUntil = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+            const newUser = {
+              activatedKey: 'trial',
+              date:         now.toISOString(),
+              trial_until:  trialUntil.toISOString(),
+              username, firstName, lastName,
+              subjects:     createDefaultSubjects(),
+              _migrated_subjects: true,
+            };
+            await redis.set(`user_id:${tgIdStr}`, newUser);
+            await registerUserId(redis, tgIdStr);
 
-    const promo = resolveFacultyPromoCode(String(key).trim());
-
-    if (isCatalogBrowse) {
-      if (promo) {
-        const catalogLimit = await checkCatalogBrowseLimit(redis, ip, tgIdStr, 'success');
-        if (catalogLimit.blocked) {
-          return res.status(429).json({ error: 'Доступ временно заблокирован. Подожди 30 минут.' });
+            const userSubjects = getUserAvailableSubjects(newUser);
+            return res.status(200).json({
+              success:  true,
+              trial:    true,
+              trialUntil,
+              subjects: userSubjects,
+              hasMicro: false,
+            });
+          }
+          if (user?.trial_until) {
+            const trialEnd = new Date(user.trial_until);
+            if (now < trialEnd) {
+              if (username !== user.username) {
+                await redis.set(`user_id:${tgIdStr}`, { ...user, username, firstName, lastName });
+                await registerUserId(redis, tgIdStr);
+              }
+              const userSubjects = getUserAvailableSubjects(user);
+              return res.status(200).json({
+                success:  true,
+                trial:    true,
+                trialUntil: trialEnd,
+                subjects: userSubjects,
+                hasMicro: userSubjects.includes('micro'),
+              });
+            }
+            if (!key) return res.status(401).json({ error: 'Пробный период истёк. Введи ключ.' });
+          }
         }
-        const profile = { username, firstName, lastName };
-        if (user && isEstablishedAccount(user)) {
-          return handleCatalogBrowseStart(res, tgIdStr, user, profile, promo);
+
+        if (!key) return res.status(401).json({ error: 'Введи код из канала или ключ доступа.' });
+
+        const promo = resolveFacultyPromoCode(String(key).trim());
+
+        if (isCatalogBrowse) {
+          if (promo) {
+            const catalogLimit = await checkCatalogBrowseLimit(redis, ip, tgIdStr, 'success');
+            if (catalogLimit.blocked) {
+              return res.status(429).json({ error: 'Доступ временно заблокирован. Подожди 30 минут.' });
+            }
+            const profile = { username, firstName, lastName };
+            if (user && isEstablishedAccount(user)) {
+              return handleCatalogBrowseStart(res, tgIdStr, user, profile, promo);
+            }
+            if (!user) {
+              return res.status(401).json({ error: 'Сначала войди в приложение.' });
+            }
+            return handlePreviewStart(res, tgIdStr, ip, user, profile, promo, true);
+          }
+          const catalogLimit = await checkCatalogBrowseLimit(redis, ip, tgIdStr, 'fail');
+          if (catalogLimit.blocked) {
+            return res.status(429).json({ error: 'Доступ временно заблокирован.' });
+          }
+          return res.status(401).json({ error: 'Неверный код' });
         }
-        if (!user) {
-          return res.status(401).json({ error: 'Сначала войди в приложение.' });
+
+        if (promo) {
+          await clearAuthRateLimitsForTgId(redis, tgIdStr);
+          return handlePreviewStart(res, tgIdStr, ip, user, { username, firstName, lastName }, promo, isCatalogBrowse);
         }
-        return handlePreviewStart(res, tgIdStr, ip, user, profile, promo, true);
+
+        const { blocked } = await checkRateLimit(ip, tgIdStr);
+        if (blocked) return res.status(429).json({ error: 'Доступ временно заблокирован.' });
+
+        if (!isValidKeyFormat(key)) return res.status(401).json({ error: 'Неверный код или ключ.' });
+
+        const paidKeysEnabled = await redis.get('settings:is_paid_keys_enabled');
+        if (paidKeysEnabled === false) {
+          return res.status(401).json({ error: 'Платные ключи временно отключены. Введи код из канала.' });
+        }
+
+        // SREM атомарен: ключ «забирает» только тот запрос, который его удалил.
+        // Раньше sismember + отдельный srem давали двум параллельным запросам
+        // активировать один ключ на два аккаунта.
+        const claimed = await redis.srem('valid_keys', key.trim());
+        if (!claimed) return res.status(401).json({ error: 'Неверный ключ.' });
+
+        const existingSubjects = user?.subjects && typeof user.subjects === 'object'
+          ? user.subjects
+          : createDefaultSubjects();
+
+        const activatedUser = {
+          ...(user || {}),
+          activatedKey:       key.trim(),
+          date:               user?.date ?? new Date().toISOString(),
+          username, firstName, lastName,
+          subjects:           existingSubjects,
+          previewStatus:      null,
+          previewChosenSubject:  null,
+          previewChosenModules:  null,
+          previewStartedAt:      null,
+          previewExpiredAt:      null,
+          _subjectsBeforePreview:     undefined,
+          _previewStatusBeforeCatalog: undefined,
+          _migrated_subjects: true,
+        };
+
+        await redis.set(`user_id:${tgIdStr}`, touchUserActivity(activatedUser));
+        await registerUserId(redis, tgIdStr);
+        await clearAuthRateLimitsForTgId(redis, tgIdStr);
+
+        const userSubjects = getUserAvailableSubjects(activatedUser);
+        return res.status(200).json({
+          success:  true,
+          subjects: userSubjects,
+          hasMicro: userSubjects.includes('micro'),
+        });
+
+      } catch (error) {
+        console.error('API Error:', error);
+        if (mode === 'check_subjects' && isRedisUnavailableError(error)) {
+          return res.status(200).json({ degraded: true, registered: true });
+        }
+        const msg = String(error instanceof Error ? error.message : error);
+        if (msg.includes('Redis env missing')) {
+          return res.status(503).json({
+            error: 'Сервер без Redis: задай KV_REST_API_URL/TOKEN или UPSTASH_REDIS_REST_URL/TOKEN.',
+          });
+        }
+        return res.status(500).json({ error: 'Ошибка сервера.' });
       }
-      const catalogLimit = await checkCatalogBrowseLimit(redis, ip, tgIdStr, 'fail');
-      if (catalogLimit.blocked) {
-        return res.status(429).json({ error: 'Доступ временно заблокирован.' });
-      }
-      return res.status(401).json({ error: 'Неверный код' });
-    }
-
-    if (promo) {
-      await clearAuthRateLimitsForTgId(redis, tgIdStr);
-      return handlePreviewStart(res, tgIdStr, ip, user, { username, firstName, lastName }, promo, isCatalogBrowse);
-    }
-
-    const { blocked } = await checkRateLimit(ip, tgIdStr);
-    if (blocked) return res.status(429).json({ error: 'Доступ временно заблокирован.' });
-
-    if (!isValidKeyFormat(key)) return res.status(401).json({ error: 'Неверный код или ключ.' });
-
-    const paidKeysEnabled = await redis.get('settings:is_paid_keys_enabled');
-    if (paidKeysEnabled === false) {
-      return res.status(401).json({ error: 'Платные ключи временно отключены. Введи код из канала.' });
-    }
-
-    // SREM атомарен: ключ «забирает» только тот запрос, который его удалил.
-    // Раньше sismember + отдельный srem давали двум параллельным запросам
-    // активировать один ключ на два аккаунта.
-    const claimed = await redis.srem('valid_keys', key.trim());
-    if (!claimed) return res.status(401).json({ error: 'Неверный ключ.' });
-
-    const existingSubjects = user?.subjects && typeof user.subjects === 'object'
-      ? user.subjects
-      : createDefaultSubjects();
-
-    const activatedUser = {
-      ...(user || {}),
-      activatedKey:       key.trim(),
-      date:               user?.date ?? new Date().toISOString(),
-      username, firstName, lastName,
-      subjects:           existingSubjects,
-      previewStatus:      null,
-      previewChosenSubject:  null,
-      previewChosenModules:  null,
-      previewStartedAt:      null,
-      previewExpiredAt:      null,
-      _subjectsBeforePreview:     undefined,
-      _previewStatusBeforeCatalog: undefined,
-      _migrated_subjects: true,
-    };
-
-    await redis.set(`user_id:${tgIdStr}`, touchUserActivity(activatedUser));
-    await registerUserId(redis, tgIdStr);
-    await clearAuthRateLimitsForTgId(redis, tgIdStr);
-
-    const userSubjects = getUserAvailableSubjects(activatedUser);
-    return res.status(200).json({
-      success:  true,
-      subjects: userSubjects,
-      hasMicro: userSubjects.includes('micro'),
     });
-
   } catch (error) {
-    console.error('API Error:', error);
-    if (mode === 'check_subjects' && isRedisUnavailableError(error)) {
-      return res.status(200).json({ degraded: true, registered: true });
+    if (isUserLockTimeout(error)) {
+      console.warn('[auth] user lock timeout', tgIdStr, mode);
+      if (mode === 'check_subjects') {
+        return res.status(200).json({ degraded: true, registered: true });
+      }
+      return res.status(503).json({ error: 'Сервер занят — попробуй ещё раз через пару секунд.' });
     }
-    const msg = String(error instanceof Error ? error.message : error);
-    if (msg.includes('Redis env missing')) {
-      return res.status(503).json({
-        error: 'Сервер без Redis: задай KV_REST_API_URL/TOKEN или UPSTASH_REDIS_REST_URL/TOKEN.',
-      });
-    }
-    return res.status(500).json({ error: 'Ошибка сервера.' });
+    throw error;
   }
 }

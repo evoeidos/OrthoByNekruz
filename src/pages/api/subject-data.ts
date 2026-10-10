@@ -32,6 +32,7 @@ import { isPreviewExpired, isPreviewModuleTrialExpired, maybeExpirePreviewUser }
 import { userHasModuleDataAccess } from '@/lib/previewModuleStatus';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
 import { buildExamTicketsForSubject, hasExamTicketData } from '@/lib/examTickets';
+import { isUserLockTimeout, withUserLock } from '@/lib/userLock';
 
 const redis     = createRedisFromEnv();
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
@@ -171,18 +172,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // 2. Проверка доступа к дисциплине
     let user: any;
     try {
-      user = await redis.get(`user_id:${telegramId}`);
-      user = await maybeExpirePreviewUser(redis, String(telegramId), user);
-      const rules = await loadGroupAccessRules(redis);
-      const applied = applyGroupAccessToUser(user, rules);
-      if (applied.changed) {
-        user = applied.user;
-        await redis.set(`user_id:${telegramId}`, user);
-      } else {
-        user = applied.user;
-      }
+      // Чтение и возможная запись (истечение пробы, групповой доступ) — под
+      // блокировкой пользователя, чтобы не затереть параллельную запись админа.
+      user = await withUserLock(redis, String(telegramId), async () => {
+        let fresh: any = await redis.get(`user_id:${telegramId}`);
+        fresh = await maybeExpirePreviewUser(redis, String(telegramId), fresh);
+        const rules = await loadGroupAccessRules(redis);
+        const applied = applyGroupAccessToUser(fresh, rules);
+        if (applied.changed) {
+          await redis.set(`user_id:${telegramId}`, applied.user);
+        }
+        return applied.user;
+      });
     } catch (err) {
-      if (isRedisUnavailableError(err)) {
+      if (isRedisUnavailableError(err) || isUserLockTimeout(err)) {
         return res.status(503).json({ error: 'Service temporarily unavailable', degraded: true });
       }
       throw err;
