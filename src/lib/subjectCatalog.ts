@@ -36,19 +36,15 @@ const MODULE_META: Record<ModuleKind, { label: string; description: string }> = 
   },
 };
 
-/** Как /api/subject-data: JSON попадает в бандл через require, fs на Vercel не работает. */
+// Список непустых JSON считает next.config.js при сборке. Здесь нельзя
+// require(`../data/${f}`): модуль импортируется клиентом (через preview.ts),
+// и webpack положил бы весь контент предметов в публичный бандл.
+const AVAILABLE_DATA_FILES = new Set(
+  (process.env.DATA_FILES_AVAILABLE || '').split(',').filter(Boolean),
+);
+
 function moduleDataAvailable(fileName: string): boolean {
-  if (!fileName) return false;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const data = require(`../data/${fileName}`);
-    if (data == null) return false;
-    if (Array.isArray(data)) return data.length > 0;
-    if (typeof data === 'object') return Object.keys(data as object).length > 0;
-    return true;
-  } catch {
-    return false;
-  }
+  return !!fileName && AVAILABLE_DATA_FILES.has(fileName);
 }
 
 export function buildSubjectCatalog(): SubjectCatalogEntry[] {

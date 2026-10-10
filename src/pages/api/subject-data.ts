@@ -8,7 +8,7 @@
 //  Тело запроса (JSON):
 //    {
 //      subject:    'micro' | 'bio' | 'fizo' | ...   (id из SUBJECTS)
-//      type:       'questions' | 'tests' | 'tasks' | 'glossary'
+//      type:       'questions' | 'tests' | 'tasks' | 'glossary' | 'tickets'
 //      telegramId: <id пользователя>
 //      initData:   <window.Telegram.WebApp.initData>
 //    }
@@ -31,6 +31,7 @@ import { filterChemTasksForFaculty, resolveChemFacultyId, resolveChemTasksFile }
 import { isPreviewExpired, isPreviewModuleTrialExpired, maybeExpirePreviewUser } from '@/lib/preview';
 import { userHasModuleDataAccess } from '@/lib/previewModuleStatus';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
+import { buildExamTicketsForSubject, hasExamTicketData } from '@/lib/examTickets';
 
 const redis     = createRedisFromEnv();
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
@@ -61,6 +62,83 @@ function loadDataFile(fileName: string): unknown | null {
   }
 }
 
+type ModuleDataType = 'questions' | 'tests' | 'tasks' | 'glossary';
+type SubjectCfg = NonNullable<ReturnType<typeof getSubject>>;
+
+/** Причина отказа в доступе к разделу или null, если доступ есть. */
+function moduleAccessError(
+  user: any,
+  subjectId: string,
+  dataType: ModuleDataType,
+  tgId: string,
+): string | null {
+  if (!userHasModuleDataAccess(user, subjectId, dataType)) return 'No access to module';
+  if (
+    user?.previewStatus === 'active'
+    && user?.previewChosenSubject === subjectId
+    && dataType !== 'glossary'
+    && user.previewModuleStatuses?.[dataType] === 'trial'
+    && isPreviewModuleTrialExpired(user, dataType, tgId)
+  ) {
+    return 'Preview module expired';
+  }
+  return null;
+}
+
+/** Данные раздела: файл по факультету и, для задач, фильтр по факультету. */
+function loadModuleData(
+  subjectCfg: SubjectCfg,
+  user: any,
+  dataType: ModuleDataType,
+): { data: unknown } | { status: number; error: string; hint?: string } {
+  let fileName: string | null = null;
+  switch (dataType) {
+    case 'questions':
+      fileName = subjectCfg.id === 'bio'
+        ? resolveBioQuestionsFile(user?.facultyId)
+        : subjectCfg.questionsFile;
+      break;
+    case 'tasks':
+      if (subjectCfg.id === 'bio') {
+        fileName = resolveBioTasksFile(resolveBioFacultyId(user));
+        if (!fileName) {
+          return { status: 403, error: 'Задачи по биологии недоступны для этого факультета' };
+        }
+      } else if (subjectCfg.id === 'chem') {
+        fileName = resolveChemTasksFile(resolveChemFacultyId(user));
+        if (!fileName) {
+          return { status: 403, error: 'Задачи по химии доступны педиатрам и лечебникам' };
+        }
+      } else {
+        fileName = subjectCfg.tasksFile;
+      }
+      break;
+    case 'tests':     fileName = subjectCfg.testsFile;     break;
+    case 'glossary':  fileName = subjectCfg.glossaryFile;  break;
+  }
+
+  const data = loadDataFile(fileName);
+  if (data === null) {
+    return {
+      status: 404,
+      error: `Data file not found: ${fileName}`,
+      hint:  'Положите JSON в src/data/ и пересоберите приложение.',
+    };
+  }
+
+  if (dataType === 'tasks' && Array.isArray(data)) {
+    if (subjectCfg.id === 'bio') {
+      const filtered = filterBioTasksForFaculty(data as { faculties?: string[] }[], resolveBioFacultyId(user));
+      return { data: filtered.map(({ faculties: _f, ...rest }) => rest) };
+    }
+    if (subjectCfg.id === 'chem') {
+      const filtered = filterChemTasksForFaculty(data as { faculties?: string[] }[], resolveChemFacultyId(user));
+      return { data: filtered.map(({ faculties: _f, ...rest }) => rest) };
+    }
+  }
+  return { data };
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end();
 
@@ -76,7 +154,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'Unknown subject' });
     }
 
-    // 1. Верификация: initData, веб-сессия или whitelist
+    // 1. Верификация: initData или веб-сессия
     const { resolveRequestIdentity } = await import('@/lib/resolveIdentity');
     const identity = await resolveRequestIdentity(redis, req, {
       telegramId,
@@ -109,6 +187,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       throw err;
     }
+    if (user?.blocked === true) {
+      return res.status(403).json({ error: 'Доступ запрещён' });
+    }
     if (user?.previewStatus === 'active' && isPreviewExpired(user, Date.now(), String(telegramId))) {
       return res.status(403).json({ error: 'Preview expired' });
     }
@@ -116,57 +197,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(403).json({ error: 'No access to subject' });
     }
 
-    const dataType = String(type) as 'questions' | 'tests' | 'tasks' | 'glossary';
-    if (!userHasModuleDataAccess(user, subjectCfg.id, dataType)) {
-      return res.status(403).json({ error: 'No access to module' });
+    // Билеты содержат ответы на вопросы и задачи — нужен доступ к обоим разделам.
+    if (type === 'tickets') {
+      for (const mod of ['questions', 'tasks'] as const) {
+        const denied = moduleAccessError(user, subjectCfg.id, mod, String(telegramId));
+        if (denied) return res.status(403).json({ error: denied });
+      }
+      const questions = loadModuleData(subjectCfg, user, 'questions');
+      const tasks = loadModuleData(subjectCfg, user, 'tasks');
+      const qList = 'data' in questions && Array.isArray(questions.data) ? questions.data : [];
+      const tList = 'data' in tasks && Array.isArray(tasks.data) ? tasks.data : [];
+      const tickets = hasExamTicketData(subjectCfg.id, qList, tList)
+        ? buildExamTicketsForSubject(subjectCfg.id, qList, tList)
+        : [];
+      return res.status(200).json({ data: tickets });
     }
 
-    const flowSubject = user?.previewChosenSubject;
-    if (
-      user?.previewStatus === 'active'
-      && flowSubject === subjectCfg.id
-      && dataType !== 'glossary'
-      && user.previewModuleStatuses?.[dataType] === 'trial'
-      && isPreviewModuleTrialExpired(user, dataType, String(telegramId))
-    ) {
-      return res.status(403).json({ error: 'Preview module expired' });
+    const dataType = String(type) as ModuleDataType;
+    if (!['questions', 'tests', 'tasks', 'glossary'].includes(dataType)) {
+      return res.status(400).json({ error: 'Unknown type' });
     }
+    const denied = moduleAccessError(user, subjectCfg.id, dataType, String(telegramId));
+    if (denied) return res.status(403).json({ error: denied });
 
     // 3. Выбор файла по type
-    let fileName: string | null = null;
-    switch (type) {
-      case 'questions':
-        fileName = subjectCfg.id === 'bio'
-          ? resolveBioQuestionsFile(user?.facultyId)
-          : subjectCfg.questionsFile;
-        break;
-      case 'tasks':
-        if (subjectCfg.id === 'bio') {
-          fileName = resolveBioTasksFile(resolveBioFacultyId(user));
-          if (!fileName) {
-            return res.status(403).json({ error: 'Задачи по биологии недоступны для этого факультета' });
-          }
-        } else if (subjectCfg.id === 'chem') {
-          fileName = resolveChemTasksFile(resolveChemFacultyId(user));
-          if (!fileName) {
-            return res.status(403).json({ error: 'Задачи по химии доступны педиатрам и лечебникам' });
-          }
-        } else {
-          fileName = subjectCfg.tasksFile;
-        }
-        break;
-      case 'tests':     fileName = subjectCfg.testsFile;     break;
-      case 'glossary':  fileName = subjectCfg.glossaryFile;  break;
-      default:          return res.status(400).json({ error: 'Unknown type' });
+    const loaded = loadModuleData(subjectCfg, user, dataType);
+    if ('status' in loaded) {
+      return res.status(loaded.status).json({ error: loaded.error, hint: loaded.hint });
     }
-
-    let data = loadDataFile(fileName);
-    if (data === null) {
-      return res.status(404).json({
-        error: `Data file not found: ${fileName}`,
-        hint:  'Положите JSON в src/data/ и пересоберите приложение.',
-      });
-    }
+    let data = loaded.data;
 
     // Мёрж кастомных записей глоссария из Redis
     if (type === 'glossary' && Array.isArray(data)) {
@@ -203,22 +262,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           data = merged;
         }
       } catch { /* Redis недоступен — отдаём JSON без оверрайдов */ }
-    }
-
-    if (type === 'tasks' && subjectCfg.id === 'bio' && Array.isArray(data)) {
-      const filtered = filterBioTasksForFaculty(
-        data as { faculties?: string[] }[],
-        resolveBioFacultyId(user),
-      );
-      data = filtered.map(({ faculties: _f, ...rest }) => rest);
-    }
-
-    if (type === 'tasks' && subjectCfg.id === 'chem' && Array.isArray(data)) {
-      const filtered = filterChemTasksForFaculty(
-        data as { faculties?: string[] }[],
-        resolveChemFacultyId(user),
-      );
-      data = filtered.map(({ faculties: _f, ...rest }) => rest);
     }
 
     return res.status(200).json({ data });

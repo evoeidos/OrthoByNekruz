@@ -95,12 +95,7 @@ export async function resolveRequestIdentity(
   const fromSession = await resolveWithSession(redis, session, bodyTg, requireTelegram);
   if (fromSession) return fromSession;
 
-  if (bodyTg && !initData) {
-    const inWL = await redis.sismember('sub_whitelist', bodyTg);
-    if (inWL) {
-      return { ok: true, tgId: bodyTg, via: 'initData', account: null };
-    }
-  }
-
+  // Whitelist (sub_whitelist) здесь намеренно не учитывается: он снимает
+  // только проверку подписки на канал, а не подтверждает личность.
   return { ok: false, status: 401, error: 'Требуется авторизация' };
 }

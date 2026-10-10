@@ -1,3 +1,6 @@
+// ТОЛЬКО ДЛЯ СЕРВЕРА: модуль импортирует JSON билетов с ответами. Импорт из
+// клиентского компонента положит их в публичный JS-бандл. Клиент получает
+// билеты через /api/subject-data (type: 'tickets'), подписи — из examTicketLabels.
 import orthoTicketsData from '@/data/ticketsData.json';
 import pharmaTicketsData from '@/data/pharma_tickets.json';
 import microTicketsData from '@/data/micro_tickets.json';
@@ -25,17 +28,13 @@ type DataItem = {
   visible?: boolean;
 };
 
-/** Больше 60 вопросов — в билете 3 вопроса + задача, иначе 2 + задача. */
-export const EXAM_QUESTIONS_PER_TICKET_THRESHOLD = 60;
+import { getQuestionsPerTicket } from '@/lib/examTicketLabels';
 
-export function getQuestionsPerTicket(questionCount: number): number {
-  return questionCount > EXAM_QUESTIONS_PER_TICKET_THRESHOLD ? 3 : 2;
-}
-
-export function getExamTicketCompositionLabel(questionCount: number): string {
-  const q = getQuestionsPerTicket(questionCount);
-  return `${q} вопроса + задача`;
-}
+export {
+  EXAM_QUESTIONS_PER_TICKET_THRESHOLD,
+  getQuestionsPerTicket,
+  getExamTicketCompositionLabel,
+} from '@/lib/examTicketLabels';
 
 function hashSeed(s: string): number {
   let h = 2166136261;

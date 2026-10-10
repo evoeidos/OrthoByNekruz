@@ -3,13 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FACULTY_SHORT_LABEL } from '@/lib/facultyCodes';
 import type { FacultyId } from '@/lib/groupRegistry';
-import {
-  LESSON_KIND_LABELS,
-  type Lesson,
-  type LessonKind,
-  type Program,
-  type ProgramSummary,
-} from '@/lib/curriculum';
+import { LESSON_KIND_LABELS, type LessonKind } from '@/lib/curriculumLabels';
+// Только типы: значения из curriculum тянут в бандл все планы кафедр.
+import type { Lesson, Program, ProgramSummary } from '@/lib/curriculum';
 import { shortFio, type RosterGroup } from '@/lib/roster';
 
 const T = {

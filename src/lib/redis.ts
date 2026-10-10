@@ -27,12 +27,24 @@ function hasNativeRedisEnv(): boolean {
   return !!(process.env.REDIS_URL?.trim() || process.env.REDIS_HOST?.trim());
 }
 
+// Один клиент на процесс. Раньше каждый вызов открывал новое TCP-соединение
+// (бот-вебхук — на каждый апдейт) и никогда его не закрывал: соединения
+// копились до maxclients. globalThis — чтобы клиент переживал HMR в dev.
+const globalForRedis = globalThis as unknown as { __appRedis?: AppRedis };
+
 /**
  * Timeweb / обычный Redis: REDIS_URL или REDIS_HOST+REDIS_PASSWORD.
  * Upstash / Vercel KV: UPSTASH_REDIS_REST_* или KV_REST_API_*.
  * Нативный Redis предпочтительнее, если задан оба варианта.
  */
 export function createRedisFromEnv(): AppRedis {
+  if (!globalForRedis.__appRedis) {
+    globalForRedis.__appRedis = buildRedisFromEnv();
+  }
+  return globalForRedis.__appRedis;
+}
+
+function buildRedisFromEnv(): AppRedis {
   if (hasNativeRedisEnv()) {
     return createNativeRedisFromEnv() as AppRedis;
   }

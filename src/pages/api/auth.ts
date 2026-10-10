@@ -478,24 +478,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     firstName = tgUser.first_name || null;
     lastName = tgUser.last_name || null;
   } else {
-    // Веб-сессия (cookie) или whitelist — без Telegram Mini App initData
+    // Без initData — только веб-сессия (cookie) с привязанным Telegram.
+    // Whitelist и тестовый аккаунт здесь не годятся: Telegram ID не секрет,
+    // и по одному ID кто угодно входил бы от имени этого пользователя.
+    // Whitelist снимает только проверку подписки на канал (ниже).
     const { resolveRequestIdentity } = await import('@/lib/resolveIdentity');
     const identity = await resolveRequestIdentity(redis, req, {
       telegramId: tgIdStr,
       initData: '',
       requireTelegram: true,
     });
-    if (identity.ok && identity.via === 'session' && identity.tgId === tgIdStr) {
-      // ok — вход с сайта после привязки Telegram
-    } else {
-      const inWL = await redis.sismember('sub_whitelist', tgIdStr);
-      if (!inWL && !isPreviewShortDurationAccount(tgIdStr)) {
-        return res.status(403).json({
-          error: 'Открой через бота или войди на сайте и привяжи Telegram.',
-          noInitData: true,
-        });
-      }
-      skipSubscriptionCheck = true;
+    if (!(identity.ok && identity.via === 'session' && identity.tgId === tgIdStr)) {
+      return res.status(403).json({
+        error: 'Открой через бота или войди на сайте и привяжи Telegram.',
+        noInitData: true,
+      });
     }
   }
 
@@ -1051,8 +1048,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(401).json({ error: 'Платные ключи временно отключены. Введи код из канала.' });
     }
 
-    const isKeyValid = await redis.sismember('valid_keys', key.trim());
-    if (!isKeyValid) return res.status(401).json({ error: 'Неверный ключ.' });
+    // SREM атомарен: ключ «забирает» только тот запрос, который его удалил.
+    // Раньше sismember + отдельный srem давали двум параллельным запросам
+    // активировать один ключ на два аккаунта.
+    const claimed = await redis.srem('valid_keys', key.trim());
+    if (!claimed) return res.status(401).json({ error: 'Неверный ключ.' });
 
     const existingSubjects = user?.subjects && typeof user.subjects === 'object'
       ? user.subjects
@@ -1076,7 +1076,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     await redis.set(`user_id:${tgIdStr}`, touchUserActivity(activatedUser));
     await registerUserId(redis, tgIdStr);
-    await redis.srem('valid_keys', key.trim());
     await clearAuthRateLimitsForTgId(redis, tgIdStr);
 
     const userSubjects = getUserAvailableSubjects(activatedUser);

@@ -32,7 +32,8 @@ const TTL_MS = BUILD_ID === 'dev' ? 5 * 60 * 1000 : 24 * 60 * 60 * 1000;
 // Инвалидация идёт через BUILD_ID при деплое и admin-cache-bust после него.
 async function checkAndBustCache(): Promise<void> { /* noop */ }
 
-export type SubjectDataType = 'questions' | 'tasks' | 'tests' | 'glossary';
+/** tickets — экзаменационные билеты, собираются на сервере (src/lib/examTickets.ts). */
+export type SubjectDataType = 'questions' | 'tasks' | 'tests' | 'glossary' | 'tickets';
 
 type Cached = { ts: number; data: unknown[] };
 
@@ -51,6 +52,11 @@ async function purgeOldCaches(): Promise<void> {
 }
 
 function cacheKey(subject: string, type: SubjectDataType): string {
+  // Билеты биологии и химии собираются из вопросов/задач своего факультета.
+  if ((subject === 'bio' || subject === 'chem') && type === 'tickets') {
+    const faculty = readStoredFacultyId() || (subject === 'bio' ? 'stomatology' : 'pediatrics');
+    return `https://cache.local/subject-data/${subject}/${type}/${faculty}`;
+  }
   if (subject === 'bio' && type === 'questions') {
     const faculty = readStoredFacultyId() || 'stomatology';
     return `https://cache.local/subject-data/${subject}/${type}/${faculty}`;
@@ -164,6 +170,10 @@ export async function bustSubjectModuleCache(
   if (typeof caches === 'undefined' || types.length === 0) return;
   try {
     const cache = await caches.open(CACHE_NAME);
-    await Promise.all(types.map(t => cache.delete(cacheKey(subject, t))));
+    // Билеты собраны из вопросов и задач — сбрасываем их вместе с ними.
+    const all = types.some(t => t === 'questions' || t === 'tasks')
+      ? [...new Set<SubjectDataType>([...types, 'tickets'])]
+      : types;
+    await Promise.all(all.map(t => cache.delete(cacheKey(subject, t))));
   } catch { /* не критично */ }
 }

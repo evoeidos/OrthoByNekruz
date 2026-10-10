@@ -30,13 +30,9 @@ export function buildProgramId(
 }
 
 /** Тип пункта плана. Контрольная и коллоквиум закрывают несколько занятий. */
-export type LessonKind = 'lesson' | 'control' | 'colloquium';
+import type { LessonKind } from '@/lib/curriculumLabels';
 
-export const LESSON_KIND_LABELS: Record<LessonKind, string> = {
-  lesson:     'Занятие',
-  control:    'Контрольная',
-  colloquium: 'Коллоквиум',
-};
+export { LESSON_KIND_LABELS, type LessonKind } from '@/lib/curriculumLabels';
 
 /**
  * Подтема занятия — один пункт из перечня, который кафедра даёт под темой.

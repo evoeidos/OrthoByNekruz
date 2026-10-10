@@ -17,12 +17,9 @@ import { ExamScreen, loadExamHistory, ExamHistoryEntry } from './ExamScreen';
 import { ResourcesSheet } from './ResourcesSheet';
 import { BindUniversityForm } from './BindUniversityForm';
 import type { UniversityProfile } from '@/lib/universityParser';
-import {
-  buildExamTicketsForSubject,
-  getExamTicketCompositionLabel,
-  hasExamTicketData,
-  type ExamTicket,
-} from '@/lib/examTickets';
+import { getExamTicketCompositionLabel } from '@/lib/examTicketLabels';
+// Только тип: сам модуль examTickets серверный (JSON билетов с ответами).
+import type { ExamTicket } from '@/lib/examTickets';
 import { restartCoachTour } from '@/lib/coachTour';
 import { UniScheduleTab } from './UniScheduleTab';
 import { UniGradesTab } from './UniGradesTab';
@@ -295,24 +292,23 @@ export const StatsTab: React.FC<StatsTabProps> = ({
   const [counts, setCounts] = useState<{ q: number; t: number; ts: number }>({ q: 0, t: 0, ts: 0 });
   const [examTickets, setExamTickets] = useState<ExamTicket[]>([]);
   const [questionsData, setQuestionsData] = useState<unknown[]>([]);
-  const [tasksData, setTasksData] = useState<unknown[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     setCounts({ q: 0, t: 0, ts: 0 });
     setExamTickets([]);
     setQuestionsData([]);
-    setTasksData([]);
     Promise.all([
       loadSubjectData(subject, 'questions'),
       loadSubjectData(subject, 'tasks'),
       loadSubjectData(subject, 'tests'),
-    ]).then(([q, t, ts]) => {
+      // Билеты собирает сервер; пустой список — данных для экзамена не хватает.
+      loadSubjectData(subject, 'tickets'),
+    ]).then(([q, t, ts, tickets]) => {
       if (cancelled) return;
       setQuestionsData(q);
-      setTasksData(t);
       setCounts({ q: q.length, t: t.length, ts: ts.length });
-      setExamTickets(buildExamTicketsForSubject(subject, q, t));
+      setExamTickets(tickets as ExamTicket[]);
     });
     return () => { cancelled = true; };
   }, [subject]);
@@ -471,7 +467,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
     ? Math.max(...examHistory.map(h => Math.round((h.score / h.total) * 100)))
     : 0;
   const lastTry = examHistory[examHistory.length - 1];
-  const enoughData = hasExamTicketData(subject, questionsData, tasksData);
+  const enoughData = examTickets.length > 0;
 
   return (
     <>
