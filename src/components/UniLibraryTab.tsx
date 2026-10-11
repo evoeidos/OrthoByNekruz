@@ -3,25 +3,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BookOpen, ChevronDown, ChevronUp, FileText, Loader2 } from 'lucide-react';
 import type { UniData } from '@/lib/uniHelpers';
-import { findActiveCycle, getTelegramAuth, krasnoyarskNow } from '@/lib/uniHelpers';
-import type { UniversityLibraryDiscipline, UniversityMethodichka, UniversityTopicPlan } from '@/lib/universityParser';
+import { findActiveCycle, krasnoyarskNow } from '@/lib/uniHelpers';
+import type { UniversityLibraryDiscipline, UniversityTopicPlan } from '@/lib/universityParser';
+import { cachedFetch, loadMethodichka, postUniData } from '@/lib/uniCache';
 import { MethodichkaDialog, type MethodichkaState } from './MethodichkaDialog';
 import { UniLockedCard } from './UniLockedCard';
 
 type DisciplinesState = 'idle' | 'loading' | { error: string } | UniversityLibraryDiscipline[];
 type TopicPlanState = 'loading' | UniversityTopicPlan | { error: string };
-
-async function postUniData(body: Record<string, unknown>): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
-  const { telegram_id, initData } = getTelegramAuth();
-  const r = await fetch('/api/auth/university/data', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ telegram_id, initData, ...body }),
-  });
-  const data = await r.json();
-  return { ok: r.ok, status: r.status, data };
-}
 
 export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ uni, onBind }) => {
   const [disciplines, setDisciplines] = useState<DisciplinesState>('idle');
@@ -53,18 +42,11 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
   useEffect(() => {
     if (!uni.bound || uni.checking || disciplines !== 'idle') return;
     setDisciplines('loading');
-    (async () => {
-      try {
-        const { ok, status, data } = await postUniData({ action: 'library' });
-        if (!ok) {
-          setDisciplines({ error: `${data.error || 'Ошибка сервера'} (HTTP ${status})` });
-        } else {
-          setDisciplines((data.disciplines as UniversityLibraryDiscipline[]) ?? []);
-        }
-      } catch (e) {
-        setDisciplines({ error: e instanceof Error ? e.message : 'Сетевая ошибка' });
-      }
-    })();
+    void cachedFetch<UniversityLibraryDiscipline[]>('library', async () => {
+      const { ok, status, data } = await postUniData({ action: 'library' });
+      if (!ok) return { error: `${data.error || 'Ошибка сервера'} (HTTP ${status})` };
+      return { value: (data.disciplines as UniversityLibraryDiscipline[]) ?? [] };
+    }, setDisciplines);
   }, [uni.bound, uni.checking, disciplines]);
 
   const toggleDiscipline = (d: UniversityLibraryDiscipline) => {
@@ -72,24 +54,16 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
     setExpanded(next);
     if (!next || topicPlans[d.umkdId] !== undefined) return;
     setTopicPlans(p => ({ ...p, [d.umkdId]: 'loading' }));
-    (async () => {
-      try {
-        const { ok, status, data } = await postUniData({ action: 'library_topics', umkdId: d.umkdId });
-        if (!ok) {
-          setTopicPlans(p => ({ ...p, [d.umkdId]: { error: `${data.error || 'Ошибка сервера'} (HTTP ${status})` } }));
-        } else {
-          setTopicPlans(p => ({
-            ...p,
-            [d.umkdId]: {
-              lectures: (data.lectures as UniversityTopicPlan['lectures']) ?? [],
-              practice: (data.practice as UniversityTopicPlan['practice']) ?? [],
-            },
-          }));
-        }
-      } catch (e) {
-        setTopicPlans(p => ({ ...p, [d.umkdId]: { error: e instanceof Error ? e.message : 'Сетевая ошибка' } }));
-      }
-    })();
+    void cachedFetch<UniversityTopicPlan>(`plan:${d.umkdId}`, async () => {
+      const { ok, status, data } = await postUniData({ action: 'library_topics', umkdId: d.umkdId });
+      if (!ok) return { error: `${data.error || 'Ошибка сервера'} (HTTP ${status})` };
+      return {
+        value: {
+          lectures: (data.lectures as UniversityTopicPlan['lectures']) ?? [],
+          practice: (data.practice as UniversityTopicPlan['practice']) ?? [],
+        },
+      };
+    }, state => setTopicPlans(p => ({ ...p, [d.umkdId]: state })));
   };
 
   const openMethodichka = (tlId: string, discipline: string, topic: string) => {
@@ -97,20 +71,7 @@ export const UniLibraryTab: React.FC<{ uni: UniData; onBind: () => void }> = ({ 
     setOpenContext({ discipline, topic });
     if (methodichkas[tlId] !== undefined) return;
     setMethodichkas(m => ({ ...m, [tlId]: 'loading' }));
-    (async () => {
-      try {
-        const { ok, status, data } = await postUniData({ action: 'methodichka', tlId });
-        if (!ok) {
-          setMethodichkas(m => ({ ...m, [tlId]: { error: `${data.error || 'Ошибка сервера'} (HTTP ${status}${data.code ? `, ${data.code}` : ''})` } }));
-        } else if (!data.methodichka) {
-          setMethodichkas(m => ({ ...m, [tlId]: { error: 'У этой темы нет методических указаний для обучающихся на сайте (либо не удалось распознать страницу).' } }));
-        } else {
-          setMethodichkas(m => ({ ...m, [tlId]: data.methodichka as UniversityMethodichka }));
-        }
-      } catch (e) {
-        setMethodichkas(m => ({ ...m, [tlId]: { error: e instanceof Error ? e.message : 'Сетевая ошибка' } }));
-      }
-    })();
+    void loadMethodichka(tlId, state => setMethodichkas(m => ({ ...m, [tlId]: state })));
   };
 
   if (!uni.bound) return <UniLockedCard title="Библиотека методичек не подключена" loading={uni.checking} onBind={onBind} />;

@@ -5,8 +5,9 @@ import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FileText, Loader2, V
 import type { UniData } from '@/lib/uniHelpers';
 import {
   krasnoyarskNow, currentWeekDays, parseTimeRange, datesIncludeToday, findMatchingDateEntry, findActiveCycle,
-  getTelegramAuth, MONTHS_GEN,
+  MONTHS_GEN,
 } from '@/lib/uniHelpers';
+import { loadMethodichka } from '@/lib/uniCache';
 import { MethodichkaDialog, type MethodichkaState } from './MethodichkaDialog';
 import { UniLockedCard } from './UniLockedCard';
 
@@ -44,27 +45,7 @@ export const UniScheduleTab: React.FC<{ uni: UniData; onBind: () => void }> = ({
     setOpenContext({ discipline, topic });
     if (methodichkas[tlId] !== undefined) return;
     setMethodichkas(m => ({ ...m, [tlId]: 'loading' }));
-    (async () => {
-      try {
-        const { telegram_id, initData } = getTelegramAuth();
-        const r = await fetch('/api/auth/university/data', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ telegram_id, initData, action: 'methodichka', tlId }),
-        });
-        const d = await r.json();
-        if (!r.ok) {
-          setMethodichkas(m => ({ ...m, [tlId]: { error: `${d.error || 'Ошибка сервера'} (HTTP ${r.status}${d.code ? `, ${d.code}` : ''})` } }));
-        } else if (!d.methodichka) {
-          setMethodichkas(m => ({ ...m, [tlId]: { error: 'У этой темы нет методических указаний для обучающихся на сайте (либо не удалось распознать страницу).' } }));
-        } else {
-          setMethodichkas(m => ({ ...m, [tlId]: d.methodichka }));
-        }
-      } catch (e) {
-        setMethodichkas(m => ({ ...m, [tlId]: { error: e instanceof Error ? e.message : 'Сетевая ошибка' } }));
-      }
-    })();
+    void loadMethodichka(tlId, state => setMethodichkas(m => ({ ...m, [tlId]: state })));
   };
 
   if (!uni.bound) return <UniLockedCard title="Расписание не подключено" loading={uni.checking || uni.loading} onBind={onBind} />;
