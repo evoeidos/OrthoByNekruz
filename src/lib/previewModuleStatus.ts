@@ -129,7 +129,31 @@ export function moduleShowsContent(
   return moduleAllowsDataAccess(status);
 }
 
-/** Доступ к JSON раздела: до отказа админа — отдаём данные при receipt_pending. */
+/**
+ * Заявка по разделу ждёт админа без временного доступа: час «на доверии»
+ * для этого раздела предмета уже был использован (см. claimPreviewReceipt).
+ */
+export function isReceiptPendingWithoutTrust(user: any, subjectId: string, module: PreviewModule): boolean {
+  const used = user?.previewModuleTrustUsed;
+  if (!used || typeof used !== 'object' || !used[`${subjectId}:${module}`]) return false;
+  const expires = user?.previewModuleTrustExpiresAt;
+  return !(expires && typeof expires === 'object' && expires[module]);
+}
+
+/** Есть ли у пользователя доступ к данным раздела с учётом заявки без доверия. */
+function moduleDataAllowedForUser(
+  user: any,
+  subjectId: string,
+  module: PreviewModule,
+  status: PreviewModuleStatus | undefined,
+): boolean {
+  if (status === 'receipt_pending' && isReceiptPendingWithoutTrust(user, subjectId, module)) {
+    return false;
+  }
+  return moduleAllowsDataAccess(status);
+}
+
+/** Доступ к JSON раздела: до отказа админа — отдаём данные при receipt_pending (кроме повторной заявки). */
 export function userHasModuleDataAccess(
   user: any,
   subjectId: string,
@@ -143,11 +167,11 @@ export function userHasModuleDataAccess(
 
   if (dataType === 'glossary') {
     return (['questions', 'tests', 'tasks'] as PreviewModule[]).some(
-      m => moduleAllowsDataAccess(statuses[m]),
+      m => moduleDataAllowedForUser(user, subjectId, m, statuses[m]),
     );
   }
 
-  return moduleAllowsDataAccess(statuses[dataType]);
+  return moduleDataAllowedForUser(user, subjectId, dataType, statuses[dataType]);
 }
 
 /** В воронке оплаты — всегда тянем JSON с сервера (не из кэша). */

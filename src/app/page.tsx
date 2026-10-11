@@ -1666,7 +1666,9 @@ export default function Home() {
     if (!mod || !chosenPreviewModules.includes(mod)) return content;
 
     const st = resolveModuleStatus(mod);
-    if (st === 'awaiting_payment' || st === 'rejected') {
+    // Повторная заявка: временный час по разделу уже был — ждём админа без доступа.
+    const pendingWithoutTrust = st === 'receipt_pending' && !previewModuleTrustExpiresAt[mod];
+    if (st === 'awaiting_payment' || st === 'rejected' || pendingWithoutTrust) {
       return (
         <PreviewPaymentTabPanel
           subjectId={previewChosen}
@@ -1675,7 +1677,7 @@ export default function Home() {
           grantedModules={grantedPreviewModules}
           moduleStatuses={paymentModuleStatuses}
           paymentSelection={previewPaymentSelection}
-          status={st}
+          status={st as 'awaiting_payment' | 'rejected' | 'receipt_pending'}
           checking={statusChecking}
           modulesUpdating={paymentModulesUpdating}
           onUpdateModules={handleUpdatePaymentModules}
@@ -1692,12 +1694,16 @@ export default function Home() {
     previewChosen, subject, tabToModule, chosenPreviewModules, grantedPreviewModules,
     paymentModuleStatuses, resolveModuleStatus, previewStatus, statusChecking, paymentModulesUpdating,
     previewPaymentSelection, handleUpdatePaymentModules, handleClaimReceipt, paymentExitProps,
+    previewModuleTrustExpiresAt,
   ]);
 
   const trustPendingModule = useMemo(() => {
     if (!previewChosen || subject !== previewChosen) return null;
-    return chosenPreviewModules.find(m => resolveModuleStatus(m) === 'receipt_pending') ?? null;
-  }, [previewChosen, subject, chosenPreviewModules, resolveModuleStatus]);
+    // Плашка «временный доступ до …» — только для заявок с часом на доверии.
+    return chosenPreviewModules.find(
+      m => resolveModuleStatus(m) === 'receipt_pending' && !!previewModuleTrustExpiresAt[m],
+    ) ?? null;
+  }, [previewChosen, subject, chosenPreviewModules, resolveModuleStatus, previewModuleTrustExpiresAt]);
 
   const trustExpiresIso = trustPendingModule
     ? previewModuleTrustExpiresAt[trustPendingModule]

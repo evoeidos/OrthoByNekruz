@@ -27,6 +27,7 @@ import {
   modulesAwaitingPayment,
   setAllModuleStatuses,
   syncModuleStatusesOnPick,
+  isReceiptPendingWithoutTrust,
 } from '@/lib/previewModuleStatus';
 
 export type { PreviewModule } from '@/lib/previewModules';
@@ -1398,10 +1399,25 @@ export function claimPreviewReceipt(user: any, modulesToClaim?: PreviewModule[])
       : {}),
   };
   const trustDeadline = new Date(Date.now() + PREVIEW_RECEIPT_TRUST_MS).toISOString();
+  // Час доступа «на доверии» — один раз на раздел предмета. Раньше после
+  // автоотказа (час прошёл, админ не подтвердил) можно было снова нажать
+  // «Скинул чек» и получить ещё час — и так бесконечно без оплаты.
+  // Повторная заявка ждёт админа без доступа и без автоотказа.
+  const trustUsed: Record<string, true> = {
+    ...(user.previewModuleTrustUsed && typeof user.previewModuleTrustUsed === 'object'
+      ? user.previewModuleTrustUsed
+      : {}),
+  };
   const payableSet = new Set(payable);
   for (const m of payable) {
     statuses[m] = 'receipt_pending';
-    trustExpires[m] = trustDeadline;
+    const trustKey = `${chosen}:${m}`;
+    if (trustUsed[trustKey]) {
+      delete trustExpires[m];
+    } else {
+      trustExpires[m] = trustDeadline;
+      trustUsed[trustKey] = true;
+    }
   }
   // Невыбранные разделы больше не «висят» в пробе — сразу экран оплаты.
   for (const m of allChosen) {
@@ -1430,6 +1446,7 @@ export function claimPreviewReceipt(user: any, modulesToClaim?: PreviewModule[])
     receiptClaimedAt:           user.receiptClaimedAt ?? new Date().toISOString(),
     previewModuleStatuses:      statuses,
     previewModuleTrustExpiresAt: trustExpires,
+    previewModuleTrustUsed:     trustUsed,
     previewPaymentSelection:    payable,
     previewQuotedPrice:         calcPreviewPriceRub(chosen, payable, {
       bioHadTest: chosen === 'bio'
@@ -1459,6 +1476,8 @@ export function applyReceiptTrustExpiries(user: any): any {
   for (const m of (['questions', 'tests', 'tasks'] as PreviewModule[])) {
     if (statuses[m] !== 'receipt_pending') continue;
     let expIso = expires[m];
+    // Повторная заявка без доступа: ждёт решения админа, сама не истекает.
+    if (!expIso && isReceiptPendingWithoutTrust(user, chosen, m)) continue;
     if (!expIso && user.receiptClaimedAt) {
       expIso = new Date(Date.parse(user.receiptClaimedAt) + PREVIEW_RECEIPT_TRUST_MS).toISOString();
       expires[m] = expIso;
