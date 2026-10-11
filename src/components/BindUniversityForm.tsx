@@ -12,6 +12,7 @@ import type {
   UniversityScheduleDay,
 } from '@/lib/universityParser';
 import { getTelegramAuth, type UniData } from '@/lib/uniHelpers';
+import { blobToDataUrl, clearUniCache, readUniCache, readUniPhoto, writeUniCache, writeUniPhoto } from '@/lib/uniCache';
 
 type BindPhase = 'idle' | 'loading' | 'success' | 'error';
 
@@ -32,16 +33,21 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
   const [password, setPassword] = useState('');
   const [phase, setPhase] = useState<BindPhase>('idle');
   const [errorMsg, setErrorMsg] = useState('');
-  const [bound, setBound] = useState(false);
-  const [boundLogin, setBoundLogin] = useState('');
-  const [checking, setChecking] = useState(true);
-  const [schedule, setSchedule] = useState<UniversityScheduleDay[]>([]);
-  const [cycles, setCycles] = useState<UniversityCycle[]>([]);
-  const [grades, setGrades] = useState<UniversityGradeRow[]>([]);
-  const [profile, setProfile] = useState<UniversityProfile | null>(null);
-  const [topics, setTopics] = useState<Record<string, Record<string, UniversityMatchedTopic>>>({});
-  const [practiceTopics, setPracticeTopics] = useState<Record<string, Record<string, UniversityMatchedTopic>>>({});
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  // Сохранённая в браузере копия — показываем сразу, сеть обновит её в фоне.
+  const [cached] = useState(() => {
+    const tgId = typeof window === 'undefined' ? '' : getTelegramAuth().telegram_id;
+    return { tgId, data: readUniCache(tgId), photo: readUniPhoto(tgId) };
+  });
+  const [bound, setBound] = useState(!!cached.data);
+  const [boundLogin, setBoundLogin] = useState(cached.data?.login ?? '');
+  const [checking, setChecking] = useState(!cached.data);
+  const [schedule, setSchedule] = useState<UniversityScheduleDay[]>(cached.data?.schedule ?? []);
+  const [cycles, setCycles] = useState<UniversityCycle[]>(cached.data?.cycles ?? []);
+  const [grades, setGrades] = useState<UniversityGradeRow[]>(cached.data?.grades ?? []);
+  const [profile, setProfile] = useState<UniversityProfile | null>(cached.data?.profile ?? null);
+  const [topics, setTopics] = useState<Record<string, Record<string, UniversityMatchedTopic>>>(cached.data?.topics ?? {});
+  const [practiceTopics, setPracticeTopics] = useState<Record<string, Record<string, UniversityMatchedTopic>>>(cached.data?.practiceTopics ?? {});
+  const [photoUrl, setPhotoUrl] = useState<string | null>(cached.photo);
   const [dataLoading, setDataLoading] = useState(false);
   const [showGrades, setShowGrades] = useState(false);
   const [showFullWeek, setShowFullWeek] = useState(false);
@@ -57,10 +63,6 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
     const tomorrow = schedule.find(d => d.weekday === tomorrowName);
     return [today, tomorrow].filter((d): d is UniversityScheduleDay => Boolean(d));
   }, [schedule, showFullWeek, todayName, tomorrowName]);
-
-  useEffect(() => {
-    return () => { if (photoUrl) URL.revokeObjectURL(photoUrl); };
-  }, [photoUrl]);
 
   useEffect(() => {
     onDataChange?.({ checking, bound, loading: dataLoading, schedule, cycles, grades, profile, topics, practiceTopics });
@@ -80,15 +82,19 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
         body: JSON.stringify({ telegram_id, initData }),
       });
       if (!r.ok) return;
-      const blob = await r.blob();
-      setPhotoUrl(URL.createObjectURL(blob));
+      // data: URL, а не blob: — его можно сохранить в localStorage и показать при следующем открытии без сети.
+      const dataUrl = await blobToDataUrl(await r.blob());
+      setPhotoUrl(prev => (prev === dataUrl ? prev : dataUrl));
+      writeUniPhoto(telegram_id, dataUrl);
     } catch {
       // фото необязательно — молча пропускаем
     }
   }, []);
 
   const loadStatus = useCallback(async () => {
-    setChecking(true);
+    const hasCache = !!cached.data;
+    // С кэшем спиннер не показываем — данные уже на экране.
+    if (!hasCache) setChecking(true);
     try {
       const { telegram_id, initData } = getTelegramAuth();
       const r = await fetch('/api/auth/university/data', {
@@ -101,16 +107,21 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
       if (r.ok && d.bound) {
         setBound(true);
         setBoundLogin(d.login || '');
-      } else {
+      } else if (r.ok) {
+        // Сервер точно говорит «не привязан» — убираем устаревшую копию.
+        clearUniCache(telegram_id);
         setBound(false);
         setBoundLogin('');
+      } else if (!hasCache) {
+        setBound(false);
       }
     } catch {
-      setBound(false);
+      // Нет связи — оставляем то, что показали из кэша.
+      if (!hasCache) setBound(false);
     } finally {
       setChecking(false);
     }
-  }, []);
+  }, [cached]);
 
   const loadTopics = useCallback(async () => {
     try {
@@ -125,6 +136,7 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
       if (r.ok) {
         setTopics(d.topics ?? {});
         setPracticeTopics(d.practiceTopics ?? {});
+        writeUniCache(telegram_id, { topics: d.topics ?? {}, practiceTopics: d.practiceTopics ?? {} });
       }
     } catch {
       // темы лекций — необязательное обогащение расписания, молча пропускаем
@@ -132,7 +144,8 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
   }, []);
 
   const loadPersonalData = useCallback(async () => {
-    setDataLoading(true);
+    const hasCache = !!cached.data;
+    if (!hasCache) setDataLoading(true);
     setErrorMsg('');
     try {
       const { telegram_id, initData } = getTelegramAuth();
@@ -149,14 +162,22 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
       setGrades(d.grades ?? []);
       setProfile(d.profile ?? null);
       if (d.login) setBoundLogin(d.login);
+      writeUniCache(telegram_id, {
+        login: d.login || cached.data?.login || '',
+        schedule: d.schedule ?? [],
+        cycles: d.cycles ?? [],
+        grades: d.grades ?? [],
+        profile: d.profile ?? null,
+      });
       void loadPhoto();
       void loadTopics();
     } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : 'Не удалось загрузить данные');
+      // При показанной копии из кэша ошибку сети не выводим — обновим при следующем открытии.
+      if (!hasCache) setErrorMsg(e instanceof Error ? e.message : 'Не удалось загрузить данные');
     } finally {
       setDataLoading(false);
     }
-  }, [loadPhoto, loadTopics]);
+  }, [cached, loadPhoto, loadTopics]);
 
   useEffect(() => { void loadStatus(); }, [loadStatus]);
 
@@ -183,6 +204,7 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Ошибка привязки');
       setPhase('success');
+      writeUniCache(telegram_id, { login: d.login || login.trim() });
       setBound(true);
       setBoundLogin(d.login || login.trim());
       setPassword('');
@@ -202,6 +224,7 @@ export const BindUniversityForm: React.FC<BindUniversityFormProps> = ({ onProfil
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ telegram_id, initData, action: 'unbind' }),
     });
+    clearUniCache(telegram_id);
     setBound(false);
     setBoundLogin('');
     setSchedule([]);

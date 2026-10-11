@@ -1,5 +1,6 @@
 import { PREVIEW_AWAITING_CONFIRM_KEY } from '@/components/AccessWelcomeOverlay';
 import { USER_FACULTY_ID_KEY } from '@/lib/facultyCodes';
+import { clearUniCache } from '@/lib/uniCache';
 
 export const AUTH_STORAGE_KEYS = [
   'is_authed',
@@ -24,6 +25,7 @@ export function readClientAuthFlag(): boolean {
 export function clearLocalSession(): void {
   if (typeof window === 'undefined') return;
   AUTH_STORAGE_KEYS.forEach(k => localStorage.removeItem(k));
+  clearUniCache();
   clearSubjectPickedSession();
 }
 
