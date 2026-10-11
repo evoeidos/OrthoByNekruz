@@ -47,21 +47,17 @@ function listAvailableDataFiles() {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Отключает сбор трассировки файлов, чтобы обойти баг micromatch
-  // (Maximum call stack size exceeded при обходе node_modules на Vercel).
-  outputFileTracing: false,
+  // Корень проекта — эта папка (иначе Next угадывает его по lock-файлам выше).
+  outputFileTracingRoot: __dirname,
   images: {
     // next/image в проекте не используется (картинки — обычные <img>), а
-    // встроенный оптимизатор /_next/image Next.js поднимает всё равно. На
-    // ветке 14.x в нём есть незакрытые уязвимости (в т.ч. RCE через AVIF),
-    // исправления только в 15.5+. Отключаем оптимизацию целиком.
+    // встроенный оптимизатор /_next/image Next.js поднимает всё равно —
+    // лишняя поверхность атаки (в нём бывали серьёзные уязвимости). Отключён.
     unoptimized: true,
   },
-  experimental: {
-    // puppeteer-core — клиент для удалённого браузера (Browserless, вход на
-    // krasgmu.ru), не должен попадать в webpack-бандл серверных компонентов.
-    serverComponentsExternalPackages: ['cheerio', 'puppeteer-core'],
-  },
+  // puppeteer-core — клиент для удалённого браузера (Browserless, вход на
+  // krasgmu.ru), не должен попадать в webpack-бандл серверного кода.
+  serverExternalPackages: ['cheerio', 'puppeteer-core'],
   env: {
     // Идентификатор сборки — попадает в клиентский бандл и используется
     // для инвалидации кэша данных предмета (src/lib/subjectData.ts).
