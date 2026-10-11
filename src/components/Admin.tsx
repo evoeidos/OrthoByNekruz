@@ -1089,11 +1089,14 @@ export default function AdminPage() {
     const tg = (window as any).Telegram?.WebApp as any;
     if (!tg) return;
 
-    tg.expand?.();
-    tg.requestFullscreen?.();
-    tg.enableClosingConfirmation?.();
-    tg.disableVerticalSwipes?.();
-    tg.BackButton?.hide?.();
+    // В старых клиентах Telegram (и в браузере) эти методы есть, но бросают
+    // WebAppMethodUnsupported — без try ошибка в эффекте роняла всю админку.
+    const safeCall = (fn: () => void) => { try { fn(); } catch { /* не поддерживается */ } };
+    safeCall(() => tg.expand?.());
+    safeCall(() => tg.requestFullscreen?.());
+    safeCall(() => tg.enableClosingConfirmation?.());
+    safeCall(() => tg.disableVerticalSwipes?.());
+    safeCall(() => tg.BackButton?.hide?.());
 
     // contentSafeAreaInset.top обновляется ПОСЛЕ fullscreenChanged — слушаем его
     const readInset = () => {
