@@ -1,5 +1,6 @@
 import type { AppRedis } from '@/lib/redis';
 import { KrasgmuAuthError } from '@/lib/krasgmu/errors';
+import { alertAdmin } from '@/lib/alertAdmin';
 
 // Каждый вход на krasgmu.ru — сессия удалённого браузера Browserless.
 // Бесплатный тариф: 1000 units в месяц, при исчерпании запросы отклоняются,
@@ -42,6 +43,11 @@ export async function reserveBrowserLogin(redis: AppRedis): Promise<void> {
   const count = await bump(redis, `krasgmu_browser_logins:${day}`, 2 * 24 * 60 * 60);
   if (count > BROWSER_LOGINS_PER_DAY) {
     console.error('[krasgmu] суточный лимит входов через браузер исчерпан', count);
+    alertAdmin(
+      'krasgmu:browser-limit',
+      `КрасГМУ: исчерпан суточный лимит входов через Browserless (${BROWSER_LOGINS_PER_DAY})`,
+      'Привязка и обновление сессий КрасГМУ отключены до завтра. Если это не атака — подними лимит или тариф Browserless.',
+    );
     throw new KrasgmuAuthError(
       'Сервис входа в КрасГМУ перегружен. Попробуйте завтра.',
       'rate_limited',

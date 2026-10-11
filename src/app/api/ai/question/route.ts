@@ -3,6 +3,7 @@ import { buildQuestionAiPrompts, friendlyAiError, generateQuestionAiAnswer } fro
 import { verifyApiStudyUser } from '@/lib/apiUserAuth';
 import { createRedisFromEnv } from '@/lib/redis';
 import { checkAiRateLimit } from '@/lib/aiRateLimit';
+import { alertAdmin } from '@/lib/alertAdmin';
 
 const redis = createRedisFromEnv();
 
@@ -60,6 +61,7 @@ export async function POST(req: Request) {
     if (out.result) {
       return NextResponse.json({ result: out.result });
     }
+    alertAdmin('ai:question', 'ИИ: не удалось ответить на вопрос', out.error);
     return NextResponse.json(
       { error: friendlyAiError(out.error || 'Не удалось получить ответ') },
       { status: 503 },

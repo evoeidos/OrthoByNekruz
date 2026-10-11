@@ -1,4 +1,5 @@
 import { KrasgmuAuthError } from '@/lib/krasgmu/errors';
+import { alertAdmin } from '@/lib/alertAdmin';
 import type { KrasgmuSessionCookies } from '@/lib/krasgmu/types';
 
 const HOME_URL = 'https://krasgmu.ru/';
@@ -116,6 +117,7 @@ export async function loginKrasgmuViaBrowser(
     if (!opened) {
       const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
       console.error('[krasgmu] "Войти" not found on home page. Body snippet:', bodyText.slice(0, 300));
+      alertAdmin('krasgmu:form-changed', 'КрасГМУ: не найдена кнопка «Войти» — сайт изменил вёрстку?', bodyText.slice(0, 300));
       throw new KrasgmuAuthError('Не найдена кнопка входа — сайт изменил вёрстку.', 'form_changed');
     }
 
@@ -140,6 +142,7 @@ export async function loginKrasgmuViaBrowser(
       throw new KrasgmuAuthError('Неверный логин или пароль', 'invalid_credentials');
     }
     console.error('[krasgmu] Browser login finished without krasgmu.auth cookie — site may have changed');
+    alertAdmin('krasgmu:no-cookie', 'КрасГМУ: вход завершился без cookie — сайт изменился?', bodyText.slice(0, 300));
     throw new KrasgmuAuthError('Не удалось войти на сайт КрасГМУ. Попробуйте позже.', 'form_changed');
   } finally {
     await context.close().catch(() => {});

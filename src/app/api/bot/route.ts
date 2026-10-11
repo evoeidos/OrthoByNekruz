@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
 import { createRedisFromEnv } from '@/lib/redis';
 import { getTelegramApiBase, tgCall } from '@/lib/telegramApi';
+import { alertAdmin } from '@/lib/alertAdmin';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || '';
@@ -186,6 +187,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error('[bot] handler error', e);
+    alertAdmin('bot:500', 'бот: ошибка обработки апдейта', e);
     return NextResponse.json({ ok: true });
   }
 }

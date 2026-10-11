@@ -4,6 +4,7 @@ import { buildMethodichkaPrompts, methodichkaCacheKey } from '@/lib/methodichkaA
 import { verifyApiStudyUser } from '@/lib/apiUserAuth';
 import { createRedisFromEnv } from '@/lib/redis';
 import { checkAiRateLimit } from '@/lib/aiRateLimit';
+import { alertAdmin } from '@/lib/alertAdmin';
 import { fetchUniversityMethodichka } from '@/lib/universityParser';
 
 const redis = createRedisFromEnv();
@@ -58,6 +59,7 @@ export async function POST(req: Request) {
       await redis.set(cacheKey, out.result, { ex: AI_CACHE_TTL_SEC });
       return NextResponse.json({ result: out.result });
     }
+    alertAdmin('ai:methodichka', 'ИИ: не удалось сделать конспект методички', out.error);
     return NextResponse.json(
       { error: friendlyAiError(out.error || 'Не удалось получить ответ') },
       { status: 503 },

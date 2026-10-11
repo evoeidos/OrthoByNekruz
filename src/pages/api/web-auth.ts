@@ -17,6 +17,7 @@ import {
 import { verifyTelegramLoginWidget, type TelegramLoginUser } from '@/lib/telegramLoginWidget';
 import { getChannelUsername, isChannelSubscribed } from '@/lib/channelSubscription';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
+import { alertAdmin } from '@/lib/alertAdmin';
 
 const redis = createRedisFromEnv();
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
@@ -118,6 +119,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'Unknown mode' });
   } catch (e) {
     console.error('[web-auth]', e);
+    alertAdmin('web-auth:500', 'веб-вход: ошибка сервера', e);
     if (isRedisUnavailableError(e)) {
       return res.status(503).json({
         error: 'База данных временно перегружена (лимит Upstash). Попробуй через пару минут.',

@@ -30,6 +30,7 @@ import type { PreviewModule } from '@/lib/previewModules';
 import { clearAuthRateLimitsForTgId } from '@/lib/authRateLimit';
 import { verifyAdminRequest } from '@/lib/adminAuth';
 import { isUserLockTimeout, withUserLock } from '@/lib/userLock';
+import { alertAdmin } from '@/lib/alertAdmin';
 import { getAllUserIds, registerUserId, removeUserId } from '@/lib/userIndex';
 import { isValidTelegramUsername, normalizeTelegramUsername } from '@/lib/tgLinks';
 import { resolveLastActivityIso } from '@/lib/userActivity';
@@ -833,6 +834,7 @@ async function handleAdminUsers(req: NextApiRequest, res: NextApiResponse) {
 
   } catch (err) {
     console.error('[admin-users] error:', err);
+    alertAdmin('admin-users:500', 'админка: ошибка сервера', err);
     return res.status(500).json({ error: 'Server error' });
   }
 }

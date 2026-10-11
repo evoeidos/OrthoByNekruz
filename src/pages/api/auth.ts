@@ -71,6 +71,7 @@ import {
 import { touchUserActivity, touchUserVisit } from '@/lib/userActivity';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
 import { isUserLockTimeout, withUserLock } from '@/lib/userLock';
+import { alertAdmin } from '@/lib/alertAdmin';
 
 const redis = createRedisFromEnv();
 
@@ -1111,6 +1112,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       } catch (error) {
         console.error('API Error:', error);
+        alertAdmin(
+          isRedisUnavailableError(error) ? 'auth:redis' : 'auth:500',
+          isRedisUnavailableError(error) ? 'вход: Redis недоступен' : `вход: ошибка сервера (${mode || 'key'})`,
+          error,
+        );
         if (mode === 'check_subjects' && isRedisUnavailableError(error)) {
           return res.status(200).json({ degraded: true, registered: true });
         }
@@ -1126,6 +1132,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch (error) {
     if (isUserLockTimeout(error)) {
       console.warn('[auth] user lock timeout', tgIdStr, mode);
+      alertAdmin('auth:lock-timeout', 'вход: запрос не дождался блокировки пользователя', `tgId ${tgIdStr}, mode ${mode}`);
       if (mode === 'check_subjects') {
         return res.status(200).json({ degraded: true, registered: true });
       }

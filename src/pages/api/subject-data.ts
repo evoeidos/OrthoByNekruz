@@ -33,6 +33,7 @@ import { userHasModuleDataAccess } from '@/lib/previewModuleStatus';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
 import { buildExamTicketsForSubject, hasExamTicketData } from '@/lib/examTickets';
 import { isUserLockTimeout, withUserLock } from '@/lib/userLock';
+import { alertAdmin } from '@/lib/alertAdmin';
 
 const redis     = createRedisFromEnv();
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
@@ -186,6 +187,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     } catch (err) {
       if (isRedisUnavailableError(err) || isUserLockTimeout(err)) {
+        alertAdmin('subject-data:503', 'контент: Redis недоступен или блокировка не взята', err);
         return res.status(503).json({ error: 'Service temporarily unavailable', degraded: true });
       }
       throw err;
@@ -271,6 +273,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   } catch (err) {
     console.error('[subject-data] error:', err);
+    alertAdmin('subject-data:500', 'контент: ошибка сервера', err);
     return res.status(500).json({ error: 'Server error' });
   }
 }
