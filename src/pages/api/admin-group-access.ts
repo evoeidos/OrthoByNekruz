@@ -9,6 +9,7 @@ import { normalizeStudyGroup, buildStudyGroupFromDigits } from '@/lib/studyGroup
 import type { FacultyId } from '@/lib/groupRegistry';
 import {
   applyGroupAccessToUser,
+  buildRuleId,
   getAdminGroupAccessTree,
   loadGroupAccessRules,
   saveGroupAccessRules,
@@ -124,13 +125,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (action === 'set_rules_bulk') {
       const facultyId = String(req.body.facultyId || '').trim() as FacultyId;
-      const subjectId = String(req.body.subjectId || '').trim();
       const enabled = req.body.enabled === true || req.body.enabled === 'true';
+      const subjectIds = resolveBulkSubjectIds(req.body);
 
-      if (!facultyId || !subjectId) {
+      if (!facultyId || !subjectIds.length) {
         return res.status(400).json({ error: 'Укажи факультет и предмет.' });
       }
-      if (!SUBJECTS.some(s => s.id === subjectId)) {
+      if (!subjectIds.every(id => SUBJECTS.some(s => s.id === id))) {
         return res.status(400).json({ error: 'Неизвестный предмет.' });
       }
 
@@ -145,20 +146,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const modules = normalizeModules(req.body.modules) as GroupAccessModule[];
       const lessonsRestricted = req.body.lessonsRestricted === true || req.body.lessonsRestricted === 'true';
 
-      let next = [...rules];
-      for (const studyGroup of studyGroups) {
-        next = upsertGroupAccessRule(next, {
-          facultyId,
-          studyGroup,
-          subjectId,
-          enabled,
-          modules,
-          durationKind,
-          durationValue,
-          examDate,
-          lessonsRestricted,
-        });
-      }
+      const existingIds = new Set(rules.map(r => r.id));
+      const next = upsertManyGroupAccessRules(
+        rules,
+        studyGroups.flatMap(studyGroup => subjectIds.map(subjectId => (enabled
+          ? {
+            facultyId,
+            studyGroup,
+            subjectId,
+            enabled,
+            modules,
+            durationKind,
+            durationValue,
+            examDate,
+            lessonsRestricted,
+          }
+          // При закрытии настройки правила не трогаем — откроется с теми же.
+          : { facultyId, studyGroup, subjectId, enabled })))
+          // Закрывать нечего, если правила не было — не плодим пустые записи.
+          .filter(p => p.enabled || existingIds.has(buildRuleId(facultyId, p.studyGroup, p.subjectId))),
+      );
       await saveGroupAccessRules(redis, next);
 
       const synced = await syncUsersForStudyGroups(facultyId, studyGroups, next);
@@ -215,6 +222,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
+    if (action === 'close_all_content') {
+      if (req.body.confirm !== true && req.body.confirm !== 'true') {
+        return res.status(400).json({ error: 'Подтверди закрытие доступа.' });
+      }
+      // Без facultyId — все факультеты.
+      const facultyId = String(req.body.facultyId || '').trim() as FacultyId | '';
+
+      const now = new Date().toISOString();
+      let closed = 0;
+      const next = rules.map(r => {
+        if (!r.enabled || (facultyId && r.facultyId !== facultyId)) return r;
+        closed++;
+        return { ...r, enabled: false, updatedAt: now };
+      });
+      await saveGroupAccessRules(redis, next);
+      const synced = await syncAllUsers(next);
+
+      return res.status(200).json({
+        ok: true,
+        tree: getAdminGroupAccessTree(next, await loadGroupCatalogOverlay(redis)),
+        closed,
+        synced,
+      });
+    }
+
     return res.status(400).json({ error: 'Unknown action' });
   } catch (e) {
     console.error('[admin-group-access]', e);
@@ -262,6 +294,12 @@ async function syncUsersForStudyGroups(
     }
   }
   return synced;
+}
+
+/** `subjectIds: string[]` или старое `subjectId: string`. */
+function resolveBulkSubjectIds(body: Record<string, unknown>): string[] {
+  const raw = Array.isArray(body.subjectIds) ? body.subjectIds : [body.subjectId];
+  return [...new Set(raw.map(s => String(s ?? '').trim()).filter(Boolean))];
 }
 
 function resolveBulkStudyGroups(

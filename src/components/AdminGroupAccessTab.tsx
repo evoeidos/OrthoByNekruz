@@ -18,6 +18,8 @@ const T = {
   successSoft: '#E4EFE3',
   warn:        '#A0741E',
   warnSoft:    '#F7EED7',
+  danger:      '#9B3B3B',
+  dangerSoft:  '#F3E4E4',
 };
 
 const FONT_SANS = 'var(--font-sans, system-ui, sans-serif)';
@@ -42,6 +44,20 @@ function moduleOptionsForSubject(
     id,
     label: PREVIEW_MODULE_LABELS[id],
     available: entry?.modules.find(m => m.id === id)?.available ?? true,
+  }));
+}
+
+/** Раздел доступен, если он есть хотя бы у одного из выбранных предметов. */
+function moduleOptionsForSubjects(
+  catalog: CatalogSubject[],
+  subjectIds: string[],
+): { id: PreviewModule; label: string; available: boolean }[] {
+  const perSubject = subjectIds.map(id => moduleOptionsForSubject(catalog, id));
+  return CORE_MODULES.map(id => ({
+    id,
+    label: PREVIEW_MODULE_LABELS[id],
+    available: perSubject.length === 0
+      || perSubject.some(opts => opts.find(m => m.id === id)?.available === true),
   }));
 }
 
@@ -106,15 +122,10 @@ const DURATION_OPTS: { id: DurationKind; label: string }[] = [
   { id: 'exam_day',  label: 'До конца дня экзамена' },
 ];
 
-interface ActiveRuleRow {
+interface ActiveGroupRow {
   studyGroup: string;
-  subjectId: string;
-  subjectLabel: string;
-  subjectColor: string;
-  shortLabel: string;
-  modules: ModuleId[];
-  expiresAt: string | null;
   course: number;
+  subjects: SubjectState[];
 }
 
 function formatExpiry(expiresAt: string | null): string {
@@ -176,7 +187,8 @@ export default function AdminGroupAccessTab({
   const [facultyId, setFacultyId] = useState<FacultyId>('stomatology');
   const [course, setCourse] = useState(2);
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
-  const [bulkSubject, setBulkSubject] = useState('bio');
+  /** null — все предметы. */
+  const [bulkSubjects, setBulkSubjects] = useState<string[] | null>(null);
   const [bulkDuration, setBulkDuration] = useState<DurationKind>('unlimited');
   const [bulkDurationValue, setBulkDurationValue] = useState(24);
   const [bulkExamDate, setBulkExamDate] = useState('');
@@ -185,7 +197,8 @@ export default function AdminGroupAccessTab({
   const [catalog, setCatalog] = useState<CatalogSubject[]>([]);
   const [bulkModules, setBulkModules] = useState<PreviewModule[]>(['questions', 'tests', 'tasks']);
   const [bulkLessonsAccess, setBulkLessonsAccess] = useState<LessonsAccess>('show');
-  const [confirmOpenAll, setConfirmOpenAll] = useState(false);
+  const [confirmGlobal, setConfirmGlobal] = useState<'open' | 'close' | null>(null);
+  const [confirmCloseScope, setConfirmCloseScope] = useState(false);
 
   const faculty = useMemo(
     () => tree.find(f => f.facultyId === facultyId) ?? null,
@@ -202,36 +215,34 @@ export default function AdminGroupAccessTab({
     [selectedGroups],
   );
 
-  const activeRules = useMemo(() => {
-    const rows: ActiveRuleRow[] = [];
-    for (const fac of tree) {
-      if (fac.facultyId !== facultyId) continue;
-      for (const c of fac.courses) {
-        if (rulesScope === 'course' && c.course !== course) continue;
-        for (const g of c.groups) {
-          for (const s of g.subjects) {
-            if (!s.active) continue;
-            rows.push({
-              studyGroup: g.studyGroup,
-              subjectId: s.id,
-              subjectLabel: s.label,
-              subjectColor: s.color,
-              shortLabel: s.shortLabel,
-              modules: s.modules,
-              expiresAt: s.expiresAt,
-              course: c.course,
-            });
-          }
-        }
+  const activeGroups = useMemo(() => {
+    const rows: ActiveGroupRow[] = [];
+    for (const c of faculty?.courses ?? []) {
+      if (rulesScope === 'course' && c.course !== course) continue;
+      for (const g of c.groups) {
+        const subjects = g.subjects.filter(s => s.active);
+        if (subjects.length) rows.push({ studyGroup: g.studyGroup, course: c.course, subjects });
       }
     }
-    return rows.sort((a, b) => {
-      const da = Number(a.studyGroup.match(/^([0-9]+)/)?.[1] || 0);
-      const db = Number(b.studyGroup.match(/^([0-9]+)/)?.[1] || 0);
-      if (da !== db) return da - db;
-      return a.subjectLabel.localeCompare(b.subjectLabel, 'ru');
-    });
-  }, [tree, facultyId, course, rulesScope]);
+    return rows.sort((a, b) =>
+      Number(a.studyGroup.match(/^([0-9]+)/)?.[1] || 0)
+      - Number(b.studyGroup.match(/^([0-9]+)/)?.[1] || 0));
+  }, [faculty, course, rulesScope]);
+
+  const activeRuleCount = useMemo(
+    () => activeGroups.reduce((n, g) => n + g.subjects.length, 0),
+    [activeGroups],
+  );
+
+  const allSubjects = useMemo(
+    () => tree.find(f => f.courses[0]?.groups[0])?.courses[0]?.groups[0]?.subjects ?? [],
+    [tree],
+  );
+
+  const effectiveBulkSubjects = useMemo(
+    () => bulkSubjects ?? allSubjects.map(s => s.id),
+    [bulkSubjects, allSubjects],
+  );
 
   const visibleGroups = useMemo(() => {
     if (!showOnlyActive) return courseGroups;
@@ -251,21 +262,29 @@ export default function AdminGroupAccessTab({
     [tree],
   );
 
-  const subjectCount = useMemo(
-    () => faculty?.courses[0]?.groups[0]?.subjects.length
-      ?? tree.find(f => f.courses[0]?.groups[0])?.courses[0]?.groups[0]?.subjects.length
-      ?? 0,
-    [faculty, tree],
+  const allActiveCount = useMemo(
+    () => tree.reduce((n, f) => n + f.courses.reduce((m, c) =>
+      m + c.groups.reduce((k, g) => k + g.subjects.filter(s => s.active).length, 0), 0), 0),
+    [tree],
   );
 
   const bulkModuleOptions = useMemo(
-    () => moduleOptionsForSubject(catalog, bulkSubject),
-    [catalog, bulkSubject],
+    () => moduleOptionsForSubjects(catalog, effectiveBulkSubjects),
+    [catalog, effectiveBulkSubjects],
   );
 
   useEffect(() => {
-    setBulkModules(defaultModulesForSubject(catalog, bulkSubject));
-  }, [catalog, bulkSubject]);
+    setBulkModules(bulkModuleOptions.filter(m => m.available).map(m => m.id));
+  }, [bulkModuleOptions]);
+
+  const toggleBulkSubject = (id: string) => {
+    const cur = new Set(effectiveBulkSubjects);
+    if (cur.has(id)) cur.delete(id);
+    else cur.add(id);
+    // Порядок как в списке предметов; снова все — обратно null.
+    const next = allSubjects.map(s => s.id).filter(sid => cur.has(sid));
+    setBulkSubjects(next.length === allSubjects.length ? null : next);
+  };
 
   const loadTree = useCallback(async () => {
     const initData = getTelegramInitData();
@@ -368,9 +387,45 @@ export default function AdminGroupAccessTab({
     }
   };
 
+  /** Закрыть все предметы у списка групп текущего факультета. */
+  const closeGroups = async (studyGroups: string[]) => {
+    if (!studyGroups.length) return;
+    const initData = getTelegramInitData();
+    if (!initData) { showToast('Нет initData'); return; }
+    setSaving(true);
+    try {
+      const r = await fetch('/api/admin-group-access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set_rules_bulk',
+          secret,
+          initData,
+          facultyId,
+          subjectIds: allSubjects.map(s => s.id),
+          enabled: false,
+          studyGroups,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Ошибка');
+      setTree(d.tree ?? []);
+      setConfirmCloseScope(false);
+      showToast(`✕ Закрыто: ${d.updated ?? 0} групп · ${d.synced ?? 0} студ.`);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Ошибка');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const bulkSet = async (enabled: boolean) => {
     if (selectedList.length === 0) {
       showToast('Выбери группы');
+      return;
+    }
+    if (effectiveBulkSubjects.length === 0) {
+      showToast('Выбери хотя бы один предмет');
       return;
     }
     if (enabled && bulkModules.length === 0) {
@@ -389,7 +444,7 @@ export default function AdminGroupAccessTab({
           secret,
           initData,
           facultyId,
-          subjectId: bulkSubject,
+          subjectIds: effectiveBulkSubjects,
           enabled,
           studyGroups: selectedList,
           syncUsers: true,
@@ -414,7 +469,7 @@ export default function AdminGroupAccessTab({
     }
   };
 
-  const openAllContent = async () => {
+  const runGlobal = async (kind: 'open' | 'close') => {
     const initData = getTelegramInitData();
     if (!initData) { showToast('Нет initData'); return; }
     setSaving(true);
@@ -423,7 +478,7 @@ export default function AdminGroupAccessTab({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'open_all_content',
+          action: kind === 'open' ? 'open_all_content' : 'close_all_content',
           secret,
           initData,
           confirm: true,
@@ -433,10 +488,10 @@ export default function AdminGroupAccessTab({
       if (!r.ok) throw new Error(d.error || 'Ошибка');
       setTree(d.tree ?? []);
       setSelectedGroups(new Set());
-      setConfirmOpenAll(false);
-      showToast(
-        `✓ Весь контент открыт: ${d.groups ?? 0} групп · ${d.subjects ?? 0} предметов · ${d.synced ?? 0} студ.`,
-      );
+      setConfirmGlobal(null);
+      showToast(kind === 'open'
+        ? `✓ Весь контент открыт: ${d.groups ?? 0} групп · ${d.subjects ?? 0} предметов · ${d.synced ?? 0} студ.`
+        : `✕ Бесплатный доступ закрыт: ${d.closed ?? 0} правил · ${d.synced ?? 0} студ.`);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Ошибка');
     } finally {
@@ -471,46 +526,51 @@ export default function AdminGroupAccessTab({
       </div>
       <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 14, lineHeight: 1.45 }}>
         Включи предмет для группы — студенты получат полный доступ без пробы при вводе группы.
-        Разным группам можно открыть разные предметы. После «Открыть доступ» выделение сбрасывается.
+        Отметь группы, выбери предметы (по умолчанию все) и нажми «Открыть» или «Закрыть».
         Оплаченный доступ не снимается.
       </div>
 
+      {/* Глобально: всем факультетам */}
       <div style={{
         background: T.warnSoft, border: `1px solid ${T.warn}55`,
         borderRadius: 12, padding: 12, marginBottom: 14,
       }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4 }}>
-          Весь контент всем
+          Все факультеты сразу
         </div>
         <div style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.45, marginBottom: 10 }}>
-          Откроет все предметы (вопросы, тесты, задачи, проверка, материалы) всем группам
-          всех факультетов, без срока.
-          {allTreeGroupCount > 0 && subjectCount > 0 && (
-            <> Сейчас в сетке {allTreeGroupCount} групп × {subjectCount} предметов.</>
-          )}
+          Сейчас открыто {allActiveCount} доступов (группа × предмет)
+          {allTreeGroupCount > 0 && allSubjects.length > 0 && (
+            <> из {allTreeGroupCount * allSubjects.length} возможных</>
+          )}.
         </div>
-        {confirmOpenAll ? (
+        {confirmGlobal ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: T.warn, lineHeight: 1.4 }}>
-              Точно открыть всё? Это нельзя отменить одной кнопкой — потом придётся закрывать по группам.
+              {confirmGlobal === 'open'
+                ? 'Открыть все предметы (все разделы, без срока) всем группам всех факультетов?'
+                : `Закрыть бесплатный доступ всем группам всех факультетов (${allActiveCount})? Оплаченный доступ останется.`}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 type="button"
-                disabled={saving || allTreeGroupCount === 0}
-                onClick={() => void openAllContent()}
+                disabled={saving}
+                onClick={() => void runGlobal(confirmGlobal)}
                 style={{
                   flex: 1, padding: '10px 12px', borderRadius: 10, border: 'none',
-                  background: T.warn, color: '#fff', fontWeight: 700, fontSize: 13,
+                  background: confirmGlobal === 'open' ? T.warn : T.danger,
+                  color: '#fff', fontWeight: 700, fontSize: 13,
                   cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
                 }}
               >
-                {saving ? 'Открываем…' : 'Да, открыть всем'}
+                {saving
+                  ? (confirmGlobal === 'open' ? 'Открываем…' : 'Закрываем…')
+                  : (confirmGlobal === 'open' ? 'Да, открыть всем' : 'Да, закрыть всем')}
               </button>
               <button
                 type="button"
                 disabled={saving}
-                onClick={() => setConfirmOpenAll(false)}
+                onClick={() => setConfirmGlobal(null)}
                 style={{
                   flex: 1, padding: '10px 12px', borderRadius: 10,
                   border: `1px solid ${T.border}`, background: T.surface,
@@ -523,19 +583,34 @@ export default function AdminGroupAccessTab({
             </div>
           </div>
         ) : (
-          <button
-            type="button"
-            disabled={saving || allTreeGroupCount === 0}
-            onClick={() => setConfirmOpenAll(true)}
-            style={{
-              width: '100%', padding: '10px 12px', borderRadius: 10, border: 'none',
-              background: T.warn, color: '#fff', fontWeight: 700, fontSize: 13,
-              cursor: saving || allTreeGroupCount === 0 ? 'default' : 'pointer',
-              opacity: saving || allTreeGroupCount === 0 ? 0.6 : 1,
-            }}
-          >
-            Открыть весь контент всем студентам
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              disabled={saving || allTreeGroupCount === 0}
+              onClick={() => setConfirmGlobal('open')}
+              style={{
+                flex: 1, padding: '10px 12px', borderRadius: 10, border: 'none',
+                background: T.warn, color: '#fff', fontWeight: 700, fontSize: 13,
+                cursor: saving || allTreeGroupCount === 0 ? 'default' : 'pointer',
+                opacity: saving || allTreeGroupCount === 0 ? 0.6 : 1,
+              }}
+            >
+              Открыть всё всем
+            </button>
+            <button
+              type="button"
+              disabled={saving || allActiveCount === 0}
+              onClick={() => setConfirmGlobal('close')}
+              style={{
+                flex: 1, padding: '10px 12px', borderRadius: 10, border: 'none',
+                background: T.dangerSoft, color: T.danger, fontWeight: 700, fontSize: 13,
+                cursor: saving || allActiveCount === 0 ? 'default' : 'pointer',
+                opacity: saving || allActiveCount === 0 ? 0.6 : 1,
+              }}
+            >
+              Закрыть всё всем
+            </button>
+          </div>
         )}
       </div>
 
@@ -545,7 +620,10 @@ export default function AdminGroupAccessTab({
           <button
             key={id}
             type="button"
-            onClick={() => { setFacultyId(id); setSelectedGroups(new Set()); setConfirmOpenAll(false); }}
+            onClick={() => {
+              setFacultyId(id); setSelectedGroups(new Set());
+              setConfirmGlobal(null); setConfirmCloseScope(false);
+            }}
             style={{
               padding: '8px 12px', borderRadius: 10, fontSize: 12, fontWeight: 700,
               border: `1px solid ${facultyId === id ? T.accent : T.border}`,
@@ -559,7 +637,7 @@ export default function AdminGroupAccessTab({
         ))}
       </div>
 
-      {/* Активные правила */}
+      {/* Активные доступы — по группам */}
       <div style={{
         background: T.surfaceAlt, border: `1px solid ${T.border}`,
         borderRadius: 12, padding: 12, marginBottom: 14,
@@ -569,107 +647,146 @@ export default function AdminGroupAccessTab({
           gap: 8, marginBottom: 8, flexWrap: 'wrap',
         }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>
-            Активные доступы
+            Открыто
             <span style={{ fontWeight: 500, color: T.textMuted, marginLeft: 6 }}>
-              ({activeRules.length})
+              {activeGroups.length} групп · {activeRuleCount} предм.
             </span>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
-            <button
-              type="button"
-              onClick={() => setRulesScope('course')}
-              style={{
-                padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                border: `1px solid ${rulesScope === 'course' ? T.accent : T.border}`,
-                background: rulesScope === 'course' ? T.accentSoft : T.surface,
-                color: rulesScope === 'course' ? T.accent : T.textFaint,
-                cursor: 'pointer',
-              }}
-            >
-              {course} курс
-            </button>
-            <button
-              type="button"
-              onClick={() => setRulesScope('faculty')}
-              style={{
-                padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                border: `1px solid ${rulesScope === 'faculty' ? T.accent : T.border}`,
-                background: rulesScope === 'faculty' ? T.accentSoft : T.surface,
-                color: rulesScope === 'faculty' ? T.accent : T.textFaint,
-                cursor: 'pointer',
-              }}
-            >
-              весь факультет
-            </button>
+            {(['course', 'faculty'] as const).map(scope => (
+              <button
+                key={scope}
+                type="button"
+                onClick={() => { setRulesScope(scope); setConfirmCloseScope(false); }}
+                style={{
+                  padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                  border: `1px solid ${rulesScope === scope ? T.accent : T.border}`,
+                  background: rulesScope === scope ? T.accentSoft : T.surface,
+                  color: rulesScope === scope ? T.accent : T.textFaint,
+                  cursor: 'pointer',
+                }}
+              >
+                {scope === 'course' ? `${course} курс` : 'весь факультет'}
+              </button>
+            ))}
           </div>
         </div>
 
-        {activeRules.length === 0 ? (
+        {activeGroups.length === 0 ? (
           <div style={{ fontSize: 12, color: T.textFaint, lineHeight: 1.45 }}>
             Нет открытых доступов{rulesScope === 'course' ? ` на ${course} курсе` : ''}.
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
-            {activeRules.map(row => (
-              <div
-                key={`${row.studyGroup}:${row.subjectId}`}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '8px 10px', borderRadius: 8,
-                  background: T.surface, border: `1px solid ${T.border}`,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedGroups(new Set([row.studyGroup]));
-                    const rowCourse = row.course;
-                    if (rowCourse !== course) setCourse(rowCourse);
-                  }}
-                  style={{
-                    padding: '4px 8px', borderRadius: 6, fontSize: 12, fontWeight: 700,
-                    border: `1px solid ${T.border}`, background: T.surfaceAlt,
-                    color: T.text, cursor: 'pointer', flexShrink: 0,
-                  }}
-                >
-                  {row.studyGroup}
-                  {rulesScope === 'faculty' && (
-                    <span style={{ fontWeight: 500, color: T.textFaint, marginLeft: 4 }}>
-                      · {row.course} к.
-                    </span>
-                  )}
-                </button>
-                <span style={{
-                  fontSize: 11, fontWeight: 700, padding: '3px 7px', borderRadius: 6,
-                  background: `${row.subjectColor}18`, color: row.subjectColor,
-                  flexShrink: 0,
-                }}>
-                  {row.subjectLabel}
-                </span>
-                <span style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  fontSize: 11, color: T.textFaint, flex: 1, minWidth: 80,
-                }}>
-                  <ModuleShortBadges modules={row.modules} />
-                  <span>{formatExpiry(row.expiresAt)}</span>
-                </span>
+          <>
+            {confirmCloseScope ? (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                 <button
                   type="button"
                   disabled={saving}
-                  onClick={() => void setRule(row.studyGroup, row.subjectId, false)}
+                  onClick={() => void closeGroups(activeGroups.map(g => g.studyGroup))}
                   style={{
-                    padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-                    border: 'none', background: '#F3E4E4', color: '#9B3B3B',
-                    cursor: saving ? 'default' : 'pointer', flexShrink: 0,
-                    opacity: saving ? 0.6 : 1,
+                    flex: 1, padding: '8px 10px', borderRadius: 8, border: 'none',
+                    background: T.danger, color: '#fff', fontWeight: 700, fontSize: 12,
+                    cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
                   }}
                 >
-                  Отключить
+                  {saving ? 'Закрываем…' : `Да, закрыть ${activeGroups.length} групп`}
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => setConfirmCloseScope(false)}
+                  style={{
+                    flex: 1, padding: '8px 10px', borderRadius: 8,
+                    border: `1px solid ${T.border}`, background: T.surface,
+                    color: T.textMuted, fontWeight: 600, fontSize: 12, cursor: 'pointer',
+                  }}
+                >
+                  Отмена
                 </button>
               </div>
-            ))}
-          </div>
+            ) : (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setConfirmCloseScope(true)}
+                style={{
+                  width: '100%', padding: '8px 10px', borderRadius: 8, marginBottom: 8,
+                  border: 'none', background: T.dangerSoft, color: T.danger,
+                  fontWeight: 700, fontSize: 12,
+                  cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
+                }}
+              >
+                Закрыть всё {rulesScope === 'course'
+                  ? `на ${course} курсе`
+                  : `на факультете ${FACULTY_SHORT_LABEL[facultyId]}`}
+              </button>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
+              {activeGroups.map(row => (
+                <div
+                  key={row.studyGroup}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 10px', borderRadius: 8,
+                    background: T.surface, border: `1px solid ${T.border}`,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedGroups(new Set([row.studyGroup]));
+                      if (row.course !== course) setCourse(row.course);
+                    }}
+                    title="Настроить группу по предметам"
+                    style={{
+                      padding: '4px 8px', borderRadius: 6, fontSize: 12, fontWeight: 700,
+                      border: `1px solid ${T.border}`, background: T.surfaceAlt,
+                      color: T.text, cursor: 'pointer', flexShrink: 0,
+                    }}
+                  >
+                    {row.studyGroup}
+                    {rulesScope === 'faculty' && (
+                      <span style={{ fontWeight: 500, color: T.textFaint, marginLeft: 4 }}>
+                        · {row.course} к.
+                      </span>
+                    )}
+                  </button>
+                  <span style={{ display: 'flex', flexWrap: 'wrap', gap: 3, flex: 1, minWidth: 0 }}>
+                    {row.subjects.length === allSubjects.length ? (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: T.success }}>
+                        все предметы
+                      </span>
+                    ) : row.subjects.map(s => (
+                      <span
+                        key={s.id}
+                        title={`${s.label} · ${formatModules(s.modules)} · ${formatExpiry(s.expiresAt)}`}
+                        style={{
+                          fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4,
+                          background: `${s.color}22`, color: s.color, lineHeight: 1.3,
+                        }}
+                      >
+                        {s.shortLabel}
+                      </span>
+                    ))}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => void closeGroups([row.studyGroup])}
+                    style={{
+                      padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                      border: 'none', background: T.dangerSoft, color: T.danger,
+                      cursor: saving ? 'default' : 'pointer', flexShrink: 0,
+                      opacity: saving ? 0.6 : 1,
+                    }}
+                  >
+                    Закрыть
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -853,22 +970,54 @@ export default function AdminGroupAccessTab({
             Выбрано групп: {selectedList.length}
           </div>
           <div style={{ fontSize: 11, color: T.textFaint, marginBottom: 8, lineHeight: 1.4 }}>
-            Действие применяется только к отмеченным группам. После открытия выбор сбросится —
-            можно отметить другие группы и другой предмет.
+            Действие применяется к отмеченным группам и выбранным предметам.
             {selectedList.length > courseGroups.filter(g => selectedGroups.has(g.studyGroup)).length && (
               <> В выбор входят группы других курсов этого факультета.</>
             )}
           </div>
+          <div style={{ marginBottom: 8 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 6,
+            }}>
+              <span>Предметы ({effectiveBulkSubjects.length} из {allSubjects.length})</span>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setBulkSubjects(bulkSubjects === null ? [] : null)}
+                style={{
+                  padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                  border: `1px solid ${T.border}`, background: T.surface,
+                  color: T.accent, cursor: 'pointer',
+                }}
+              >
+                {bulkSubjects === null ? 'Снять все' : 'Выбрать все'}
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {allSubjects.map(s => {
+                const on = effectiveBulkSubjects.includes(s.id);
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    disabled={saving}
+                    onClick={() => toggleBulkSubject(s.id)}
+                    style={{
+                      padding: '5px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                      border: `1px solid ${on ? s.color : T.border}`,
+                      background: on ? `${s.color}1A` : T.surface,
+                      color: on ? s.color : T.textFaint,
+                      cursor: saving ? 'default' : 'pointer',
+                    }}
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-            <select
-              value={bulkSubject}
-              onChange={e => setBulkSubject(e.target.value)}
-              style={{ flex: 1, minWidth: 120, padding: 8, borderRadius: 8, border: `1px solid ${T.border}` }}
-            >
-              {(faculty?.courses[0]?.groups[0]?.subjects ?? []).map(s => (
-                <option key={s.id} value={s.id}>{s.label}</option>
-              ))}
-            </select>
             <select
               value={bulkDuration}
               onChange={e => setBulkDuration(e.target.value as DurationKind)}
@@ -934,7 +1083,7 @@ export default function AdminGroupAccessTab({
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               type="button"
-              disabled={saving || bulkModules.length === 0}
+              disabled={saving || bulkModules.length === 0 || effectiveBulkSubjects.length === 0}
               onClick={() => void bulkSet(true)}
               style={{
                 flex: 1, padding: '10px 12px', borderRadius: 10, border: 'none',
@@ -942,16 +1091,16 @@ export default function AdminGroupAccessTab({
                 cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
               }}
             >
-              Открыть доступ
+              Открыть
             </button>
             <button
               type="button"
-              disabled={saving}
+              disabled={saving || effectiveBulkSubjects.length === 0}
               onClick={() => void bulkSet(false)}
               style={{
                 flex: 1, padding: '10px 12px', borderRadius: 10,
-                border: `1px solid ${T.border}`, background: T.surface,
-                color: T.textMuted, fontWeight: 600, fontSize: 13,
+                border: 'none', background: T.dangerSoft,
+                color: T.danger, fontWeight: 700, fontSize: 13,
                 cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
               }}
             >
@@ -967,10 +1116,29 @@ export default function AdminGroupAccessTab({
           background: T.surface, border: `1px solid ${T.border}`,
           borderRadius: 12, padding: 12,
         }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
-            Группа {singleGroup.studyGroup}
-            {singleGroup.international && (
-              <span style={{ fontSize: 11, color: T.warn, fontWeight: 500 }}> · иностранцы</span>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 8, marginBottom: 10,
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>
+              Группа {singleGroup.studyGroup}
+              {singleGroup.international && (
+                <span style={{ fontSize: 11, color: T.warn, fontWeight: 500 }}> · иностранцы</span>
+              )}
+            </div>
+            {singleGroup.subjects.some(s => s.active) && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void closeGroups([singleGroup.studyGroup])}
+                style={{
+                  padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700,
+                  border: 'none', background: T.dangerSoft, color: T.danger,
+                  cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
+                }}
+              >
+                Закрыть все предметы
+              </button>
             )}
           </div>
           {singleGroup.subjects.map(subj => (
@@ -1119,7 +1287,7 @@ function SubjectRow({
             onClick={() => onToggle(false)}
             style={{
               padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700,
-              border: 'none', background: '#F3E4E4', color: '#9B3B3B',
+              border: 'none', background: T.dangerSoft, color: T.danger,
               cursor: saving ? 'default' : 'pointer',
             }}
           >

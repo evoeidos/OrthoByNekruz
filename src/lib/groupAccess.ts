@@ -325,10 +325,13 @@ export function applyGroupAccessToUser(
     groupGrants[sid] = list;
   }
 
-  // Удалить истёкшие записи
+  // Удалить истёкшие записи и записи правил, которые закрыли (или удалили)
+  const matchedIds = new Set(matched.map(r => r.id));
   for (const sid of Object.keys(groupGrants)) {
     const before = groupGrants[sid].length;
-    groupGrants[sid] = groupGrants[sid].filter(g => isGrantActive(g.expiresAt, nowMs));
+    groupGrants[sid] = groupGrants[sid].filter(
+      g => matchedIds.has(g.ruleId) && isGrantActive(g.expiresAt, nowMs),
+    );
     if (groupGrants[sid].length !== before) changed = true;
     if (groupGrants[sid].length === 0) delete groupGrants[sid];
   }
