@@ -6,7 +6,7 @@ Telegram Mini App для студентов-медиков КрасГМУ: во�
 
 ## Стек и запуск
 
-Next.js 14.2 (App Router + Pages Router), React 18, TypeScript strict,
+Next.js 15.5 (App Router + Pages Router), React 19, TypeScript strict,
 Tailwind. Хранилище — только Redis (ioredis на Timeweb, Upstash как запасной).
 
 ```bash
