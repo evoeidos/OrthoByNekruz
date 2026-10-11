@@ -16,6 +16,7 @@ import {
   Settings2, LogOut,
   X,
 } from 'lucide-react';
+import { isCorrectTestOption, resolveCorrectOption } from '@/lib/testAnswers';
 
 import { AppBrandIcon } from './AppBrandIcon';
 import ReactMarkdown from 'react-markdown';
@@ -36,36 +37,6 @@ interface MistakeRecord {
 const LETTERS = ['А', 'Б', 'В', 'Г', 'Д', 'Е'];
 
 const LONG_PRESS_MS = 500;
-
-/** Сравнение ответа с ключом: «2) Э. Геккель» = «Э. Геккель», «5)» = «5) К. Бэр». */
-function normalizeTestOptionText(s: string): string {
-  return s
-    .replace(/^[0-9]+\)\s*/u, '')
-    .replace(/^[a-zа-я][\).]\s*/iu, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function optionNumberPrefix(option: string): string | null {
-  const m = option.trim().match(/^(\d+)\)/u);
-  return m ? m[1] : null;
-}
-
-function isCorrectTestOption(option: string, correct: string): boolean {
-  if (option === correct) return true;
-  const normOpt = normalizeTestOptionText(option);
-  const normCor = normalizeTestOptionText(correct);
-  if (normOpt && normCor && normOpt === normCor) return true;
-  const prefixOnly = correct.trim().match(/^(\d+)\)\s*$/u);
-  if (prefixOnly) {
-    return optionNumberPrefix(option) === prefixOnly[1];
-  }
-  return false;
-}
-
-function resolveCorrectOption(test: { options: string[]; correct: string }): string {
-  return test.options.find(o => isCorrectTestOption(o, test.correct)) ?? test.correct;
-}
 
 // ─── Block button (shared between flat and themed grids) ──────────────────────
 const BlockButton = ({
