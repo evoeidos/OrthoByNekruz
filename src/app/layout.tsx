@@ -53,13 +53,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             if (theme === 'dark')   root.classList.add('dark');
             if (theme === 'bright') root.classList.add('dark', 'bright');
 
-            function initTG() {
-              var tg = window.Telegram && window.Telegram.WebApp;
-              if (!tg) return false;
-
+            // Настройка Telegram — один раз, как только SDK доступен. Раньше она
+            // повторялась на каждой итерации опроса отступов (до 100 раз), и вне
+            // Telegram / в старых клиентах каждый раз сыпала ошибками.
+            var tgSetupDone = false;
+            function setupTG(tg) {
               tg.ready();
               tg.expand();
-              try { tg.requestFullscreen(); } catch(e) {}
+
+              // Полноэкранный режим — с Bot API 8.0; в старых клиентах метод бросает ошибку.
+              var canFullscreen = typeof tg.isVersionAtLeast === 'function' && tg.isVersionAtLeast('8.0');
+              function requestFS() {
+                if (!canFullscreen || tg.isFullscreen) return;
+                try { tg.requestFullscreen(); } catch(e) {}
+              }
+              requestFS();
+              setTimeout(requestFS, 300);
+              setTimeout(requestFS, 1000);
 
               function disableSwipe() {
                 try { tg.disableVerticalSwipes(); } catch(e) {}
@@ -77,6 +87,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               try { tg.setHeaderColor(bg); }     catch(e) {}
               try { tg.setBackgroundColor(bg); } catch(e) {}
               try { tg.setBottomBarColor(bg); }  catch(e) {}
+            }
+
+            function initTG() {
+              var tg = window.Telegram && window.Telegram.WebApp;
+              if (!tg) return false;
+              if (!tgSetupDone) {
+                tgSetupDone = true;
+                setupTG(tg);
+              }
 
               var sysTop   = (tg.safeAreaInsets && tg.safeAreaInsets.top)               || 0;
               var tgTop    = (tg.contentSafeAreaInsets && tg.contentSafeAreaInsets.top)  || 0;
