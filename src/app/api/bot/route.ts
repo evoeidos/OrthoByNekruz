@@ -126,22 +126,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, duplicate: true });
     }
 
-    const chatMember = update?.chat_member ?? update?.my_chat_member;
-    if (chatMember) {
-      const chat = chatMember.chat;
-      const newStatus = chatMember.new_chat_member?.status;
-      const userId = chatMember.new_chat_member?.user?.id;
-      const isOurChannel = chat?.username === CHANNEL_USERNAME;
-      const isLeaving = ['left', 'kicked', 'banned'].includes(newStatus);
-
-      if (isOurChannel && isLeaving && userId) {
-        const redis = getRedis();
-        if (redis) {
-          await redis.set(`unsub:${userId}`, 1, { ex: 60 * 60 * 24 * 7 });
-        }
-      }
-    }
-
     const message = update?.message;
 
     if (message && message.text) {

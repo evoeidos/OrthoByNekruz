@@ -150,10 +150,3 @@ export function createNativeRedisFromEnv(): NativeRedisClient {
 
   return new NativeRedisClient(client);
 }
-
-export async function pingNativeRedis(client: NativeRedisClient): Promise<boolean> {
-  const raw = (client as unknown as { client: Redis }).client;
-  await raw.connect();
-  const pong = await raw.ping();
-  return pong === 'PONG';
-}

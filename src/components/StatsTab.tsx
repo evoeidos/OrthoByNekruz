@@ -14,7 +14,6 @@ import { SUBJECTS, getSubject, APP_BRAND_NAME } from '@/lib/subjects';
 import { loadSubjectData } from '@/lib/subjectData';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ExamScreen, loadExamHistory, ExamHistoryEntry } from './ExamScreen';
-import { ResourcesSheet } from './ResourcesSheet';
 import { BindUniversityForm } from './BindUniversityForm';
 import type { UniversityProfile } from '@/lib/universityParser';
 import { getExamTicketCompositionLabel } from '@/lib/examTicketLabels';
@@ -271,7 +270,6 @@ interface StatsTabProps {
   /** Скрыть блок «Проверка готовности» (управляется из админки per-user) */
   examHidden?:      boolean;
   /** Скрыть раздел «Полезные материалы» (управляется из админки per-user) */
-  materialsHidden?: boolean;
 }
 
 export const StatsTab: React.FC<StatsTabProps> = ({
@@ -284,7 +282,6 @@ export const StatsTab: React.FC<StatsTabProps> = ({
   onCheckPaymentStatus,
   checkPaymentBusy = false,
   examHidden      = false,
-  materialsHidden = false,
 }) => {
   const cfg     = getSubject(subject);
   const isOrtho = subject === 'ortho';
@@ -333,7 +330,6 @@ export const StatsTab: React.FC<StatsTabProps> = ({
   const [theme,              setTheme]              = useState<Theme>('dark');
   const [glossaryColor,      setGlossaryColor]      = useState<string>('var(--c-text)');
   const [showSubjectSheet,   setShowSubjectSheet]   = useState(false);
-  const [showResources,      setShowResources]      = useState(false);
   const [showExam,           setShowExam]           = useState(false);
   const [examHistory,        setExamHistory]        = useState<ExamHistoryEntry[]>([]);
   const [examDate,           setExamDate]           = useState<string | null>(null);
@@ -848,27 +844,6 @@ export const StatsTab: React.FC<StatsTabProps> = ({
               );
             })()}
 
-            {/* ─── ПОЛЕЗНЫЕ МАТЕРИАЛЫ ─── */}
-            {!materialsHidden && <button
-              onClick={() => setShowResources(true)}
-              className="w-full rounded-[18px] p-4 flex items-center gap-3.5 transition-all duration-200 active:scale-[0.98]"
-              style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}
-            >
-              <div
-                className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 text-[20px]"
-                style={{ background: `color-mix(in srgb, ${accentColor} 14%, transparent)`, border: '1px solid var(--c-border)' }}
-              >
-                📚
-              </div>
-              <div className="flex-1 text-left min-w-0">
-                <div className="text-[14px] font-bold" style={{ color: 'var(--c-text)' }}>Полезные материалы</div>
-                <div className="text-[11.5px] mt-0.5" style={{ color: 'var(--c-muted)' }}>
-                  Ссылки, PDF, презентации, документы
-                </div>
-              </div>
-              <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: accentColor }} />
-            </button>}
-
             {/* ─── КАК ПОЛЬЗОВАТЬСЯ ─── */}
             <button
               type="button"
@@ -967,17 +942,6 @@ export const StatsTab: React.FC<StatsTabProps> = ({
           </div>
         </ScrollArea>
       </div>
-
-      {/* Полезные материалы */}
-      <AnimatePresence>
-        {showResources && (
-          <ResourcesSheet
-            subject={subject}
-            accentColor={accentColor}
-            onClose={() => setShowResources(false)}
-          />
-        )}
-      </AnimatePresence>
 
       {/* Subject bottom sheet */}
       <AnimatePresence>

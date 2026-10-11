@@ -1935,7 +1935,6 @@ export default function Home() {
             }
             checkPaymentBusy={statusChecking}
             examHidden={(navHidden[subject] || []).includes('exam')}
-            materialsHidden={(navHidden[subject] || []).includes('materials')}
             onMicroUnlocked={() => {
               setHasMicro(true);
               localStorage.setItem('has_micro', 'true');
