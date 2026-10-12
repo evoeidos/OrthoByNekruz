@@ -152,7 +152,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         lessons: p.lessons.map(l => {
           const { annotation, images, questions, tests, ...rest } = l;
           const hasContent = !!(annotation?.length || images?.length || questions?.length || tests?.length);
-          return hasContent ? { ...rest, hasContent } : rest;
+          if (!hasContent) return rest;
+          return {
+            ...rest,
+            hasContent,
+            ...(questions?.length ? { questionCount: questions.length } : {}),
+            ...(tests?.length ? { testCount: tests.length } : {}),
+          };
         }),
         lectures: p.lectures,
       };

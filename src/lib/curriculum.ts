@@ -94,6 +94,9 @@ export interface Lesson {
   tests?: LessonTest[];
   /** Только в ответе API: у занятия есть аннотация/вопросы/тесты, текст грузится отдельно */
   hasContent?: boolean;
+  /** Только в ответе API: сколько вопросов и тестов, чтобы показать в списке до загрузки текста */
+  questionCount?: number;
+  testCount?: number;
   /** Для контрольной и коллоквиума: номера занятий, которые входят в блок */
   covers?: number[];
   hours?: number;
