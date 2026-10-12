@@ -31,6 +31,9 @@ const KIND_LABELS: Record<LessonKind, string> = {
 
 const CONTROL_COLOR = '#B4801F';
 
+/** Отступ сверху под кнопки Telegram — как у шапок остальных вкладок. */
+const TOP_PAD = 'max(12px, calc(var(--header-pt) - 24px))';
+
 /** Предмет, по которому у студента есть занятия (для переключателя). */
 interface LessonSubjectOption {
   id: string;
@@ -226,8 +229,8 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
     setShowKrasgmu(false);
     setLessonSubject(id);
   }, []);
-  const chips = (
-    <SubjectChips
+  const switcher = (
+    <SubjectSwitcher
       options={chipOptions}
       active={showKrasgmu ? KRASGMU_CHIP : lessonSubject}
       onSelect={selectChip}
@@ -306,11 +309,16 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
   if (showKrasgmu) {
     return (
       <div className="flex flex-col h-full">
-        {chips}
         <div
-          className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-2 space-y-3"
-          style={{ paddingBottom: 'var(--scroll-pb, 96px)' }}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 space-y-3"
+          style={{ paddingTop: TOP_PAD, paddingBottom: 'var(--scroll-pb, 96px)' }}
         >
+          <div className="flex items-center gap-2 px-1">
+            <span className="flex-1 text-[20px] font-bold leading-tight" style={{ color: 'var(--c-text)' }}>
+              Занятия
+            </span>
+            {switcher}
+          </div>
           <div className="text-[12px] leading-snug px-1" style={{ color: 'var(--c-muted)' }}>
             Твои дисциплины с сайта КрасГМУ: темы занятий и методички к ним.
           </div>
@@ -345,9 +353,9 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
   if (!studyGroup) {
     return (
       <div className="flex flex-col h-full">
-        {chips}
         <div className="flex-1 min-h-0">
           <EmptyState
+            switcher={switcher}
             title="Сначала укажи группу"
             text="Планы кафедр приходят для конкретной группы. А свои дисциплины с сайта университета можно открыть в «🎓 Мои дисциплины» — после привязки аккаунта КрасГМУ."
             action={onOpenProfile ? { label: 'В профиль', onClick: onOpenProfile } : undefined}
@@ -362,18 +370,19 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
     const others = lessonSubjects.filter(o => o.id !== lessonSubject);
     return (
       <div className="flex flex-col h-full">
-        {chips}
         <div className="flex-1 min-h-0">
           {subjectLabel ? (
             <EmptyState
+              switcher={switcher}
               title={`Занятия по предмету «${subjectLabel}» готовятся`}
               text={others.length > 0
-                ? 'План кафедры по этому предмету ещё не добавлен. Пока можно открыть «🎓 Мои дисциплины» с сайта КрасГМУ или другие предметы курса — они выше.'
-                : 'План кафедры по этому предмету ещё не добавлен. Пока можно открыть «🎓 Мои дисциплины» с сайта КрасГМУ — вкладка выше.'}
+                ? 'План кафедры по этому предмету ещё не добавлен. Пока можно открыть «🎓 Мои дисциплины» с сайта КрасГМУ или другой предмет курса — кнопка выше.'
+                : 'План кафедры по этому предмету ещё не добавлен. Пока можно открыть «🎓 Мои дисциплины» с сайта КрасГМУ — кнопка выше.'}
               action={{ label: 'Обновить', onClick: () => void load() }}
             />
           ) : (
             <EmptyState
+              switcher={switcher}
               title={`Для группы ${studyGroup} занятий пока нет`}
               text="План кафедры ещё не открыт. Он появится здесь, как только будет готов."
               action={{ label: 'Обновить', onClick: () => void load() }}
@@ -392,9 +401,8 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
 
   return (
     <div className="flex flex-col h-full">
-      {chips}
       <ScrollArea className="flex-1">
-        <div className="px-4 pt-3 flex flex-col gap-2 pb-28">
+        <div className="px-4 flex flex-col gap-2 pb-28" style={{ paddingTop: TOP_PAD }}>
           {/* Обложка курса: прогресс и следующее занятие */}
           <div
             className="relative overflow-hidden rounded-3xl p-4 flex flex-col gap-3.5"
@@ -422,9 +430,7 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
                     {studyGroup}
                   </span>
                 </div>
-                <div className="text-[12.5px] mt-1 leading-snug" style={{ color: 'var(--c-muted)' }}>
-                  {view.label}
-                </div>
+                <div className="mt-2">{switcher}</div>
                 <div className="flex items-center gap-1.5 flex-wrap mt-2.5">
                   <MetaChip icon={<BookOpen className="w-3.5 h-3.5" />}>
                     {total - controlCount} {plural(total - controlCount, ['занятие', 'занятия', 'занятий'])}
@@ -1630,8 +1636,8 @@ function LecturesBlock({ lectures, accent }: { lectures: Lecture[]; accent: stri
   );
 }
 
-/** Предметы курса с занятиями — горизонтальная лента, текущий выделен. */
-function SubjectChips({
+/** Текущий предмет кнопкой; по нажатию снизу выезжает список предметов курса. */
+function SubjectSwitcher({
   options,
   active,
   onSelect,
@@ -1640,30 +1646,94 @@ function SubjectChips({
   active: string;
   onSelect: (id: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const current = options.find(o => o.id === active) ?? options[0];
+  if (!current) return null;
+
   return (
-    <div
-      className="flex-shrink-0 flex gap-2 overflow-x-auto px-4 pt-3 pb-1"
-      style={{ scrollbarWidth: 'none' }}
-    >
-      {options.map(o => {
-        const isActive = o.id === active;
-        return (
-          <button
-            key={o.id}
-            type="button"
-            onClick={() => onSelect(o.id)}
-            className="flex-shrink-0 text-[12.5px] font-semibold px-3 py-1.5 rounded-full whitespace-nowrap active:scale-95 transition-transform duration-150"
-            style={{
-              background: isActive ? `color-mix(in srgb, ${o.color} 18%, transparent)` : 'var(--c-card)',
-              color: isActive ? o.color : 'var(--c-muted)',
-              border: `1px solid ${isActive ? `color-mix(in srgb, ${o.color} 45%, transparent)` : 'var(--c-border)'}`,
-            }}
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-2 max-w-full pl-3 pr-2.5 py-1.5 rounded-full text-[13px] font-semibold active:scale-95 transition-transform duration-150"
+        style={{
+          background: 'color-mix(in srgb, var(--c-bg) 55%, transparent)',
+          color: 'var(--c-text)',
+          border: `1px solid color-mix(in srgb, ${current.color} 40%, var(--c-border))`,
+        }}
+        aria-haspopup="dialog"
+      >
+        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: current.color }} />
+        <span className="truncate">{current.label}</span>
+        <ChevronDown className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--c-muted)' }} />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            className="fixed inset-0 z-[130] flex flex-col justify-end"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            style={{ background: 'hsl(0 0% 0% / 0.45)' }}
+            onClick={() => setOpen(false)}
           >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
+            <motion.div
+              role="dialog"
+              aria-label="Выбор предмета"
+              initial={{ y: 40 }}
+              animate={{ y: 0 }}
+              exit={{ y: 40 }}
+              transition={{ type: 'spring', damping: 30, stiffness: 340 }}
+              className="rounded-t-3xl px-4 pt-3 flex flex-col gap-1 text-left"
+              style={{
+                background: 'var(--c-card)',
+                borderTop: '1px solid var(--c-border)',
+                paddingBottom: 'calc(var(--nav-bottom, 0px) + 20px)',
+                maxHeight: '70vh',
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div
+                className="w-10 h-1 rounded-full mx-auto mb-2 flex-shrink-0"
+                style={{ background: 'var(--c-border)' }}
+              />
+              <div
+                className="text-[11px] font-bold uppercase tracking-widest px-2 pb-1 flex-shrink-0"
+                style={{ color: 'var(--c-muted)' }}
+              >
+                Предмет
+              </div>
+              <div className="overflow-y-auto flex flex-col gap-1">
+                {options.map(o => {
+                  const isActive = o.id === active;
+                  return (
+                    <button
+                      key={o.id}
+                      type="button"
+                      onClick={() => { setOpen(false); onSelect(o.id); }}
+                      className="flex items-center gap-3 w-full text-left px-3 py-3 rounded-2xl active:opacity-70 transition-opacity"
+                      style={{
+                        background: isActive ? `color-mix(in srgb, ${o.color} 14%, transparent)` : undefined,
+                      }}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: o.color }} />
+                      <span
+                        className="flex-1 text-[15px] font-semibold"
+                        style={{ color: isActive ? o.color : 'var(--c-text)' }}
+                      >
+                        {o.label}
+                      </span>
+                      {isActive && <CheckCircle2 className="w-5 h-5 flex-shrink-0" style={{ color: o.color }} />}
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
 
@@ -1671,13 +1741,17 @@ function EmptyState({
   title,
   text,
   action,
+  switcher,
 }: {
   title: string;
   text: string;
   action?: { label: string; onClick: () => void };
+  /** Переключатель предмета над сообщением */
+  switcher?: React.ReactNode;
 }) {
   return (
     <div className="h-full flex flex-col items-center justify-center px-8 text-center gap-3">
+      {switcher && <div className="mb-3">{switcher}</div>}
       <CalendarDays className="w-7 h-7" style={{ color: 'var(--c-muted)' }} />
       <div className="text-[15px] font-bold" style={{ color: 'var(--c-text)' }}>
         {title}
