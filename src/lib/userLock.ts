@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { randomBytes } from 'crypto';
 import type { AppRedis } from '@/lib/redis';
+import { alertAdmin } from '@/lib/alertAdmin';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Блокировка записи пользователя (user_id:{tgId}).
@@ -22,7 +23,24 @@ const LOCK_TTL_SEC = 15;
 const LOCK_WAIT_MS = 10_000;
 const LOCK_POLL_MS = 50;
 
+/** Дольше — подозрительно: остальные запросы студента в это время ждут. */
+const SLOW_HOLD_MS = 5_000;
+
 const heldLocks = new AsyncLocalStorage<Set<string>>();
+
+/** Алерт о долгом удержании: кто держал (первые кадры стека). */
+function reportSlowHold(tgId: string, heldMs: number): void {
+  const where = (new Error().stack ?? '')
+    .split('\n')
+    .slice(1)
+    // В проде пути ведут в .next/server/<роут>.js — этого достаточно, чтобы понять, кто держал.
+    .filter(line => !/node:|node_modules|userLock/.test(line))
+    .slice(0, 3)
+    .map(line => line.trim())
+    .join('\n');
+  console.warn('[userLock] блокировка удерживалась долго', tgId, heldMs, where);
+  alertAdmin('user-lock:slow', `блокировка пользователя удерживалась ${Math.round(heldMs / 1000)} с`, `tgId ${tgId}\n${where}`);
+}
 
 export class UserLockTimeoutError extends Error {
   constructor(tgId: string) {
@@ -81,10 +99,13 @@ export async function withUserLock<T>(
   const token = await acquire(redis, id);
   const nextHeld = new Set(held ?? []);
   nextHeld.add(id);
+  const startedAt = Date.now();
   try {
     return await heldLocks.run(nextHeld, fn);
   } finally {
     if (token) await release(redis, id, token);
+    const heldMs = Date.now() - startedAt;
+    if (heldMs > SLOW_HOLD_MS) reportSlowHold(id, heldMs);
   }
 }
 
