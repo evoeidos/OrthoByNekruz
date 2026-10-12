@@ -28,7 +28,7 @@ import { getSubject, getAllDataFileNames } from '@/lib/subjects';
 import { resolveBioQuestionsFile } from '@/lib/bioQuestions';
 import { filterBioTasksForFaculty, resolveBioFacultyId, resolveBioTasksFile } from '@/lib/bioTasks';
 import { filterChemTasksForFaculty, resolveChemFacultyId, resolveChemTasksFile } from '@/lib/chemTasks';
-import { isPreviewExpired, isPreviewModuleTrialExpired, maybeExpirePreviewUser } from '@/lib/preview';
+import { computePreviewExpiry, isPreviewExpired, isPreviewModuleTrialExpired } from '@/lib/preview';
 import { userHasModuleDataAccess } from '@/lib/previewModuleStatus';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
 import { buildExamTicketsForSubject, hasExamTicketData } from '@/lib/examTickets';
@@ -173,18 +173,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // 2. Проверка доступа к дисциплине
     let user: any;
     try {
-      // Чтение и возможная запись (истечение пробы, групповой доступ) — под
-      // блокировкой пользователя, чтобы не затереть параллельную запись админа.
-      user = await withUserLock(redis, String(telegramId), async () => {
-        let fresh: any = await redis.get(`user_id:${telegramId}`);
-        fresh = await maybeExpirePreviewUser(redis, String(telegramId), fresh);
-        const rules = await loadGroupAccessRules(redis);
-        const applied = applyGroupAccessToUser(fresh, rules);
-        if (applied.changed) {
-          await redis.set(`user_id:${telegramId}`, applied.user);
-        }
-        return applied.user;
-      });
+      // Почти всегда это только чтение — без блокировки. Если истекла проба
+      // или поменялся групповой доступ, запись идёт под блокировкой
+      // пользователя по свежей копии (иначе затёрли бы параллельную запись
+      // админа). Раньше блокировку брал каждый запрос контента, и при
+      // нескольких запросах разом они упирались в таймаут ожидания.
+      const tgId = String(telegramId);
+      const rules = await loadGroupAccessRules(redis);
+      const project = (u: any) => applyGroupAccessToUser(computePreviewExpiry(u, tgId), rules).user;
+      const current: any = await redis.get(`user_id:${tgId}`);
+      user = project(current);
+      if (user !== current) {
+        user = await withUserLock(redis, tgId, async () => {
+          const fresh: any = await redis.get(`user_id:${tgId}`);
+          const next = project(fresh);
+          if (next !== fresh) await redis.set(`user_id:${tgId}`, next);
+          return next;
+        });
+      }
     } catch (err) {
       if (isRedisUnavailableError(err) || isUserLockTimeout(err)) {
         alertAdmin('subject-data:503', 'контент: Redis недоступен или блокировка не взята', err);

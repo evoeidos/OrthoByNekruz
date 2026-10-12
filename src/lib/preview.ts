@@ -1806,6 +1806,22 @@ export function healExamNavHidden(user: any): any {
 }
 
 /**
+ * Истечение пробы и часа «на доверии» без записи: тот же объект, если ничего
+ * не истекло. Позволяет читателям (subject-data) брать блокировку только
+ * тогда, когда действительно есть что записать.
+ */
+export function computePreviewExpiry(user: any, tgId: string): any {
+  if (!user) return user;
+  const afterTrust = applyReceiptTrustExpiries(user);
+  if (afterTrust.previewStatus !== 'active') {
+    const chosen = normalizePreviewModules(afterTrust.previewChosenModules);
+    const statuses = ensureModuleStatusMap(afterTrust);
+    if (!chosen.some(m => statuses[m] === 'trial')) return afterTrust;
+  }
+  return applyModuleTrialExpiries(afterTrust, tgId);
+}
+
+/**
  * Пишет производную от переданного user — вызывать под withUserLock
  * (src/lib/userLock.ts) со свежепрочитанным пользователем.
  */
@@ -1814,23 +1830,7 @@ export async function maybeExpirePreviewUser(
   tgId: string,
   user: any,
 ): Promise<any> {
-  if (!user) return user;
-
-  let updated = applyReceiptTrustExpiries(user);
-  if (updated !== user) {
-    await redis.set(`user_id:${tgId}`, updated);
-    user = updated;
-  }
-
-  if (user.previewStatus !== 'active') {
-    const chosen = normalizePreviewModules(user.previewChosenModules);
-    const statuses = ensureModuleStatusMap(user);
-    const hasTrial = chosen.some(m => statuses[m] === 'trial');
-    if (!hasTrial) return user;
-  }
-
-  updated = applyModuleTrialExpiries(user, tgId);
-  if (updated === user) return user;
-  await redis.set(`user_id:${tgId}`, updated);
+  const updated = computePreviewExpiry(user, tgId);
+  if (updated !== user) await redis.set(`user_id:${tgId}`, updated);
   return updated;
 }
