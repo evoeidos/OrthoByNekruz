@@ -189,7 +189,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const next = project(fresh);
           if (next !== fresh) await redis.set(`user_id:${tgId}`, next);
           return next;
-        });
+        }, 'subject-data');
       }
     } catch (err) {
       if (isRedisUnavailableError(err) || isUserLockTimeout(err)) {

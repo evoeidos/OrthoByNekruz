@@ -1,5 +1,6 @@
 import { Redis } from '@upstash/redis';
 import { createNativeRedisFromEnv, type NativeRedisClient } from '@/lib/nativeRedis';
+import { recordRedisCall } from '@/lib/redisStats';
 
 /** Общий контракт Redis для Upstash REST и Timeweb TCP (ioredis). */
 export type AppRedis = {
@@ -39,9 +40,29 @@ const globalForRedis = globalThis as unknown as { __appRedis?: AppRedis };
  */
 export function createRedisFromEnv(): AppRedis {
   if (!globalForRedis.__appRedis) {
-    globalForRedis.__appRedis = buildRedisFromEnv();
+    globalForRedis.__appRedis = withCallTiming(buildRedisFromEnv());
   }
   return globalForRedis.__appRedis;
+}
+
+/** Время каждой команды — в учёт redisStats (если участок кода его ведёт). */
+function withCallTiming(client: AppRedis): AppRedis {
+  return new Proxy(client, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== 'function' || prop === 'pipeline') return value;
+      return (...args: unknown[]) => {
+        const started = performance.now();
+        const result = value.apply(target, args);
+        if (result && typeof (result as Promise<unknown>).finally === 'function') {
+          return (result as Promise<unknown>).finally(() => {
+            recordRedisCall(String(prop), String(args[0] ?? ''), performance.now() - started);
+          });
+        }
+        return result;
+      };
+    },
+  });
 }
 
 function buildRedisFromEnv(): AppRedis {

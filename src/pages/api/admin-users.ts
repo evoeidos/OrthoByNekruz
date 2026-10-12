@@ -284,7 +284,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const auth = verifyAdminRequest(req);
   if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
   try {
-    return await withUserLock(redis, String(tgId), () => handleAdminUsers(req, res));
+    return await withUserLock(redis, String(tgId), () => handleAdminUsers(req, res), `admin:${action}`);
   } catch (e) {
     if (isUserLockTimeout(e)) {
       return res.status(503).json({ error: 'Студент сейчас что-то делает в приложении — повтори через пару секунд.' });
@@ -326,7 +326,7 @@ async function handleAdminUsers(req: NextApiRequest, res: NextApiResponse) {
             await saveUser(id, next);
             gifted = true;
           }
-        });
+        }, 'admin:gift_bio_tasks');
         if (gifted) updated++; else skipped++;
       }
       return res.status(200).json({

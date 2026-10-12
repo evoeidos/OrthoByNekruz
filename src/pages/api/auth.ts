@@ -781,8 +781,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
 
         if (mode === 'sync_preview_active') {
+          // Пользователя ещё нет — синхронизировать нечего (раньше тут падало на null).
           if (!user) {
-            return res.status(200).json({ success: true, ...(await subjectsResponse(user, tgIdStr)) });
+            return res.status(200).json({ success: true, registered: false, subjects: [] });
           }
           const deltaMs = Number(req.body?.deltaMs);
           const moduleRaw = String(req.body?.module || '').trim();
@@ -1148,11 +1149,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
         return res.status(500).json({ error: 'Ошибка сервера.' });
       }
-    });
+    }, `auth:${mode || 'key'}`);
   } catch (error) {
     if (isUserLockTimeout(error)) {
       console.warn('[auth] user lock timeout', tgIdStr, mode);
-      alertAdmin('auth:lock-timeout', 'вход: запрос не дождался блокировки пользователя', `tgId ${tgIdStr}, mode ${mode}`);
+      alertAdmin(`auth:lock-timeout:${tgIdStr}`, 'вход: запрос не дождался блокировки пользователя', `tgId ${tgIdStr}, mode ${mode}`);
       if (mode === 'check_subjects') {
         return res.status(200).json({ degraded: true, registered: true });
       }
