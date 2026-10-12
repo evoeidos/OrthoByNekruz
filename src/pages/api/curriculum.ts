@@ -1,10 +1,10 @@
 /**
  * /api/curriculum — занятия по плану кафедры для студента.
  *
- * Планы приходят двумя путями. Первый: у студента открыт предмет — тогда он
- * видит всю дисциплину своего факультета целиком, за все курсы, а не только
- * свой семестр. Второй: админ выдал план конкретной группе — так можно открыть
- * занятия по предмету, который студент не покупал.
+ * Занятия — материалы с сайта университета, поэтому бесплатны: любой студент
+ * с указанной группой видит планы кафедр своего факультета для своего курса.
+ * Сверх этого: по открытому (купленному, выданному) предмету — вся дисциплина
+ * за все курсы; по плану, выданному админом группе, — даже чужого факультета.
  */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
@@ -12,6 +12,7 @@ import { verifyInitDataUser } from '@/lib/verifyInitData';
 import { getSubject } from '@/lib/subjects';
 import { applyGroupAccessToUser, loadGroupAccessRules } from '@/lib/groupAccess';
 import { facultyFromStudyGroup, normalizeStudyGroup } from '@/lib/studyGroup';
+import { parseCourseFromGroupDigits } from '@/lib/groupRegistry';
 import {
   type Program,
   loadAllPrograms,
@@ -105,6 +106,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // Занятия — материалы с сайта университета, поэтому бесплатно всем студентам:
+    // все программы кафедр своего факультета для курса группы (208с → 2 курс).
+    // Платными остаются вопросы, тесты и задачи.
+    const groupCourse = parseCourseFromGroupDigits(studyGroup);
+    if (groupCourse) {
+      for (const p of allPrograms) {
+        if (p.facultyId === facultyId && p.course === groupCourse) byId.set(p.id, p);
+      }
+    }
+
+    // Предметы, по которым у студента есть занятия, — для переключателя во вкладке.
+    const lessonSubjects = [...new Set([...byId.values()].map(p => p.subjectId))]
+      .map(id => {
+        const cfg = getSubject(id);
+        return { id, label: cfg?.label ?? id, color: cfg?.color ?? 'hsl(210 90% 58%)' };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+
     const visible = [...byId.values()]
       .filter(p => !onlySubject || p.subjectId === onlySubject);
 
@@ -139,7 +158,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       };
     });
 
-    return res.status(200).json({ ok: true, studyGroup, programs });
+    return res.status(200).json({ ok: true, studyGroup, programs, lessonSubjects });
   } catch (e) {
     if (isRedisUnavailableError(e)) {
       return res.status(503).json({ error: 'Сервис временно недоступен.' });

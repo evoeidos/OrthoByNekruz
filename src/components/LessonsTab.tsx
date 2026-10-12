@@ -24,6 +24,13 @@ const KIND_LABELS: Record<LessonKind, string> = {
 
 const CONTROL_COLOR = '#B4801F';
 
+/** Предмет, по которому у студента есть занятия (для переключателя). */
+interface LessonSubjectOption {
+  id: string;
+  label: string;
+  color: string;
+}
+
 interface StudentProgram {
   id: string;
   subjectId: string;
@@ -128,6 +135,10 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
 }) => {
   const [programs, setPrograms] = useState<StudentProgram[]>([]);
   const [studyGroup, setStudyGroup] = useState<string | null>(null);
+  // Занятия бесплатны по всем предметам курса — во вкладке можно переключиться
+  // с предмета, выбранного в приложении, на любой другой из этого списка.
+  const [lessonSubject, setLessonSubject] = useState(subject);
+  const [lessonSubjects, setLessonSubjects] = useState<LessonSubjectOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [readingId, setReadingId] = useState<string | null>(null);
@@ -146,26 +157,28 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telegramId: tgId, initData, subjectId: subject }),
+        body: JSON.stringify({ telegramId: tgId, initData, subjectId: lessonSubject }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(String(d.error || 'Ошибка'));
       setStudyGroup(d.studyGroup ?? null);
       setPrograms((d.programs as StudentProgram[]) ?? []);
+      setLessonSubjects((d.lessonSubjects as LessonSubjectOption[]) ?? []);
     } catch {
       setFailed(true);
     } finally {
       setLoading(false);
     }
-  }, [subject]);
+  }, [lessonSubject]);
 
+  useEffect(() => { setLessonSubject(subject); }, [subject]);
   useEffect(() => { void load(); }, [load]);
 
   const subjects = useMemo(() => buildSubjectViews(programs), [programs]);
 
   const view = useMemo(
-    () => subjects.find(s => s.subjectId === subject) ?? null,
-    [subjects, subject],
+    () => subjects.find(s => s.subjectId === lessonSubject) ?? null,
+    [subjects, lessonSubject],
   );
 
   useEffect(() => {
@@ -202,7 +215,7 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telegramId: tgId, initData, subjectId: subject, programId, lessonId }),
+        body: JSON.stringify({ telegramId: tgId, initData, subjectId: lessonSubject, programId, lessonId }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(String(d.error || 'Ошибка'));
@@ -210,7 +223,7 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
     } catch {
       setContents(prev => ({ ...prev, [key]: 'failed' }));
     }
-  }, [subject]);
+  }, [lessonSubject]);
 
   useEffect(() => {
     if (!readingBase?.lesson.hasContent || !readingKey) return;
@@ -267,22 +280,31 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
   }
 
   if (!view) {
-    const subjectLabel = getSubject(subject)?.label;
-    if (subjectLabel) {
-      return (
-        <EmptyState
-          title={`Занятия по предмету «${subjectLabel}» готовятся`}
-          text="План кафедры по этому предмету ещё не добавлен. Он появится здесь, как только будет готов."
-          action={{ label: 'Обновить', onClick: () => void load() }}
-        />
-      );
-    }
+    const subjectLabel = getSubject(lessonSubject)?.label;
+    const others = lessonSubjects.filter(o => o.id !== lessonSubject);
     return (
-      <EmptyState
-        title={`Для группы ${studyGroup} занятий пока нет`}
-        text="План кафедры ещё не открыт. Он появится здесь сразу после того, как предмет станет доступен."
-        action={{ label: 'Обновить', onClick: () => void load() }}
-      />
+      <div className="flex flex-col h-full">
+        {lessonSubjects.length > 0 && (
+          <SubjectChips options={lessonSubjects} active={lessonSubject} onSelect={setLessonSubject} />
+        )}
+        <div className="flex-1 min-h-0">
+          {subjectLabel ? (
+            <EmptyState
+              title={`Занятия по предмету «${subjectLabel}» готовятся`}
+              text={others.length > 0
+                ? 'План кафедры по этому предмету ещё не добавлен. Пока можно открыть занятия по другим предметам курса — они выше.'
+                : 'План кафедры по этому предмету ещё не добавлен. Он появится здесь, как только будет готов.'}
+              action={{ label: 'Обновить', onClick: () => void load() }}
+            />
+          ) : (
+            <EmptyState
+              title={`Для группы ${studyGroup} занятий пока нет`}
+              text="План кафедры ещё не открыт. Он появится здесь, как только будет готов."
+              action={{ label: 'Обновить', onClick: () => void load() }}
+            />
+          )}
+        </div>
+      </div>
     );
   }
 
@@ -291,6 +313,9 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
 
   return (
     <div className="flex flex-col h-full">
+      {lessonSubjects.length > 1 && (
+        <SubjectChips options={lessonSubjects} active={lessonSubject} onSelect={setLessonSubject} />
+      )}
       <div
         className="flex-shrink-0 px-4 pt-4 pb-3"
         style={{ borderBottom: '1px solid var(--c-border)' }}
@@ -1320,6 +1345,43 @@ function LecturesBlock({ lectures }: { lectures: Lecture[] }) {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Предметы курса с занятиями — горизонтальная лента, текущий выделен. */
+function SubjectChips({
+  options,
+  active,
+  onSelect,
+}: {
+  options: LessonSubjectOption[];
+  active: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div
+      className="flex-shrink-0 flex gap-2 overflow-x-auto px-4 pt-3 pb-1"
+      style={{ scrollbarWidth: 'none' }}
+    >
+      {options.map(o => {
+        const isActive = o.id === active;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            onClick={() => onSelect(o.id)}
+            className="flex-shrink-0 text-[12.5px] font-semibold px-3 py-1.5 rounded-full whitespace-nowrap active:scale-95 transition-transform duration-150"
+            style={{
+              background: isActive ? `color-mix(in srgb, ${o.color} 18%, transparent)` : 'var(--c-card)',
+              color: isActive ? o.color : 'var(--c-muted)',
+              border: `1px solid ${isActive ? `color-mix(in srgb, ${o.color} 45%, transparent)` : 'var(--c-border)'}`,
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
