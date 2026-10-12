@@ -59,7 +59,7 @@ import { buildPreviewSubjectCatalog } from '@/lib/previewCatalogSettings';
 import type { FacultyPromo } from '@/lib/facultyCodes';
 import { verifyInitDataUser } from '@/lib/verifyInitData';
 import { registerUserId } from '@/lib/userIndex';
-import { clearAuthRateLimitsForTgId, checkCatalogBrowseLimit } from '@/lib/authRateLimit';
+import { clearAuthRateLimitsForRequest, checkCatalogBrowseLimit } from '@/lib/authRateLimit';
 import {
   buildCatalogSelectingUser,
   canExitCatalogBrowse,
@@ -86,6 +86,7 @@ type Profile = { username: string | null; firstName: string | null; lastName: st
 async function handleCatalogBrowseStart(
   res: NextApiResponse,
   tgIdStr: string,
+  ip: string,
   user: any,
   profile: Profile,
   promo: FacultyPromo,
@@ -115,7 +116,7 @@ async function handleCatalogBrowseStart(
     : buildCatalogSelectingUser(user, profile, promo);
 
   await saveUser(tgIdStr, merged);
-  await clearAuthRateLimitsForTgId(redis, tgIdStr);
+  await clearAuthRateLimitsForRequest(redis, tgIdStr, ip);
   return res.status(200).json({
     success: true,
     catalogBrowse: true,
@@ -155,7 +156,7 @@ async function handlePreviewStart(
     if (catalogBrowse && promo) {
       const merged = restartCatalogBrowseSelecting(user, profile, promo);
       await saveUser(tgIdStr, merged);
-      await clearAuthRateLimitsForTgId(redis, tgIdStr);
+      await clearAuthRateLimitsForRequest(redis, tgIdStr, ip);
       return res.status(200).json({
         success: true,
         preview: true,
@@ -219,7 +220,7 @@ async function handlePreviewStart(
         lastName:     profile.lastName ?? refreshed.lastName,
       };
       await saveUser(tgIdStr, refreshed);
-      await clearAuthRateLimitsForTgId(redis, tgIdStr);
+      await clearAuthRateLimitsForRequest(redis, tgIdStr, ip);
       return res.status(200).json({
         success: true,
         alreadyConfirmed: true,
@@ -228,7 +229,7 @@ async function handlePreviewStart(
     }
     const merged = buildCatalogSelectingUser(user, profile, promo);
     await saveUser(tgIdStr, merged);
-    await clearAuthRateLimitsForTgId(redis, tgIdStr);
+    await clearAuthRateLimitsForRequest(redis, tgIdStr, ip);
     return res.status(200).json({ success: true, preview: true, catalogBrowse: true, subjects: [], ...previewPayload(merged, catalog, tgIdStr) });
   }
 
@@ -247,7 +248,7 @@ async function handlePreviewStart(
   const newUser = buildSelectingPreviewUser(profile, promo);
   await saveUser(tgIdStr, newUser);
   await redis.sadd('used_demo_ids', tgIdStr);
-  await clearAuthRateLimitsForTgId(redis, tgIdStr);
+  await clearAuthRateLimitsForRequest(redis, tgIdStr, ip);
 
   return res.status(200).json({ success: true, preview: true, ...previewPayload(newUser, catalog, tgIdStr) });
 }
@@ -577,7 +578,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return res.status(429).json({ error: 'Доступ временно заблокирован. Подожди 30 минут.' });
           }
           const profile = { username, firstName, lastName };
-          return handleCatalogBrowseStart(res, tgIdStr, user, profile, promo);
+          return handleCatalogBrowseStart(res, tgIdStr, ip, user, profile, promo);
         }
 
         if (mode === 'exit_catalog_browse') {
@@ -1063,7 +1064,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             }
             const profile = { username, firstName, lastName };
             if (user && isEstablishedAccount(user)) {
-              return handleCatalogBrowseStart(res, tgIdStr, user, profile, promo);
+              return handleCatalogBrowseStart(res, tgIdStr, ip, user, profile, promo);
             }
             if (!user) {
               return res.status(401).json({ error: 'Сначала войди в приложение.' });
@@ -1078,7 +1079,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
 
         if (promo) {
-          await clearAuthRateLimitsForTgId(redis, tgIdStr);
+          await clearAuthRateLimitsForRequest(redis, tgIdStr, ip);
           return handlePreviewStart(res, tgIdStr, ip, user, { username, firstName, lastName }, promo, isCatalogBrowse);
         }
 
@@ -1120,7 +1121,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         await redis.set(`user_id:${tgIdStr}`, touchUserActivity(activatedUser));
         await registerUserId(redis, tgIdStr);
-        await clearAuthRateLimitsForTgId(redis, tgIdStr);
+        await clearAuthRateLimitsForRequest(redis, tgIdStr, ip);
 
         const userSubjects = getUserAvailableSubjects(activatedUser);
         return res.status(200).json({

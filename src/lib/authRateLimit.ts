@@ -7,7 +7,26 @@ type RedisScanDel = {
 
 const AUTH_PREFIXES = ['block', 'rate', 'viol', 'catalog_block', 'catalog_fail', 'catalog_open'];
 
-/** Снимает лимиты входа и каталога для tgId (все IP). */
+/**
+ * Снимает лимиты входа и каталога для tgId с IP текущего запроса — прямым
+ * DEL известных ключей. Для горячего пути входа: полный SCAN (ниже) перебирает
+ * всю базу и при задержке Redis ~40 мс шёл десятки секунд, держа блокировку
+ * пользователя, — остальные запросы студента падали по таймауту.
+ */
+export async function clearAuthRateLimitsForRequest(
+  redis: { del: (...keys: string[]) => Promise<unknown> },
+  tgId: string,
+  ip: string,
+): Promise<void> {
+  const id = String(tgId).trim();
+  const keys: string[] = [];
+  for (const suffix of [id, `demo_${id}`]) {
+    for (const prefix of AUTH_PREFIXES) keys.push(`${prefix}:${ip}:${suffix}`);
+  }
+  await redis.del(...keys);
+}
+
+/** Снимает лимиты входа и каталога для tgId со всех IP (SCAN — только для админки). */
 export async function clearAuthRateLimitsForTgId(redis: RedisScanDel, tgId: string): Promise<number> {
   const id = String(tgId).trim();
   const suffixes = [id, `demo_${id}`];
@@ -19,7 +38,7 @@ export async function clearAuthRateLimitsForTgId(redis: RedisScanDel, tgId: stri
       const pattern = `${prefix}:*:${suffix}`;
       let cur = 0;
       do {
-        const [nextCur, keys] = await redis.scan(cur, { match: pattern, count: 100 });
+        const [nextCur, keys] = await redis.scan(cur, { match: pattern, count: 1000 });
         cur = Number(nextCur);
         if (keys.length > 0) {
           await redis.del(...(keys as [string, ...string[]]));

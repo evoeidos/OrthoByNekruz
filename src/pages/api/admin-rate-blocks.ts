@@ -21,7 +21,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     for (const pattern of ['block:*', 'catalog_block:*']) {
       let cursor = 0;
       do {
-        const [nextCursor, keys] = await redis.scan(cursor, { match: pattern, count: 100 });
+        const [nextCursor, keys] = await redis.scan(cursor, { match: pattern, count: 1000 });
         cursor = Number(nextCursor);
 
         for (const key of keys) {

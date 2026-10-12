@@ -20,7 +20,7 @@ export async function getAllUserIds(redis: AppRedis): Promise<string[]> {
   const ids: string[] = [];
   let cursor = 0;
   do {
-    const [nextCursor, keys] = await redis.scan(cursor, { match: 'user_id:*', count: 100 });
+    const [nextCursor, keys] = await redis.scan(cursor, { match: 'user_id:*', count: 1000 });
     cursor = Number(nextCursor);
     for (const key of keys as string[]) {
       ids.push(key.replace('user_id:', ''));

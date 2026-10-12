@@ -742,7 +742,7 @@ async function handleAdminUsers(req: NextApiRequest, res: NextApiResponse) {
         try {
           let cur = 0;
           do {
-            const [nextCur, keys] = await redis.scan(cur, { match: `opens*:${id}:*`, count: 100 });
+            const [nextCur, keys] = await redis.scan(cur, { match: `opens*:${id}:*`, count: 1000 });
             cur = Number(nextCur);
             if ((keys as string[]).length) {
               await redis.del(...(keys as [string, ...string[]]));
