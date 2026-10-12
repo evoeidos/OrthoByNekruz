@@ -47,13 +47,22 @@ describe('userLock', () => {
   });
 
   it('разные пользователи не ждут друг друга', async () => {
+    // Проверяем пересечение участков, а не время: замер по часам мигал под нагрузкой.
     const redis = createFakeRedis();
-    const started = Date.now();
+    let insideA = false;
+    let bRanWhileAInside = false;
     await Promise.all([
-      withUserLock(redis, 'a', () => sleep(150)),
-      withUserLock(redis, 'b', () => sleep(150)),
+      withUserLock(redis, 'a', async () => {
+        insideA = true;
+        await sleep(150);
+        insideA = false;
+      }),
+      withUserLock(redis, 'b', async () => {
+        await sleep(50);
+        bRanWhileAInside = insideA;
+      }),
     ]);
-    expect(Date.now() - started).toBeLessThan(280);
+    expect(bRanWhileAInside).toBe(true);
   });
 
   it('если Redis недоступен для блокировки — запрос всё равно выполняется', async () => {
