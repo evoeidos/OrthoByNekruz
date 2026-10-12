@@ -471,7 +471,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   let username: string | null = null;
   let firstName: string | null = null;
   let lastName: string | null = null;
-  let skipSubscriptionCheck = false;
 
   if (initData) {
     const tgUser = verifyInitDataUser(initData, BOT_TOKEN || '');
@@ -500,6 +499,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
+  // Проверка подписки — до блокировки пользователя: это запрос в Telegram
+  // (до 4 с), и держать на нём блокировку нельзя — остальные запросы этого
+  // студента ждали бы. От данных пользователя проверка не зависит.
+  const isOwner = !!ADMIN_TG_ID && tgIdStr === ADMIN_TG_ID;
+  if (!isOwner && !isPreviewShortDurationAccount(tgIdStr)) {
+    let inWhitelist = false;
+    try {
+      inWhitelist = !!(await redis.sismember('sub_whitelist', tgIdStr));
+    } catch {
+      // Redis недоступен — не отказываем из-за этого: ниже сработает деградация.
+      inWhitelist = true;
+    }
+    if (!inWhitelist && !(await isSubscribed(Number(tgIdStr)))) {
+      return res.status(403).json({
+        error: `Подпишись на @${CHANNEL_USERNAME} для доступа.`,
+        needSubscription: true,
+      });
+    }
+  }
+
   // Всё чтение-запись пользователя дальше — под блокировкой (src/lib/userLock.ts):
   // иначе параллельный запрос мог затереть подтверждение оплаты админом.
   try {
@@ -523,26 +542,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
         user = ensureSubjectsField(user);
 
-        const isOwner = ADMIN_TG_ID && tgIdStr === ADMIN_TG_ID;
         if (!isOwner && user?.blocked === true) {
           return res.status(403).json({ error: 'Твой аккаунт заблокирован. Свяжись с администратором.', blocked: true });
-        }
-
-        if (isOwner || isPreviewShortDurationAccount(tgIdStr)) {
-          skipSubscriptionCheck = true;
-        }
-
-        if (!skipSubscriptionCheck) {
-          const inWhitelist = await redis.sismember('sub_whitelist', tgIdStr);
-          if (!inWhitelist) {
-            const subscribed = await isSubscribed(Number(tgIdStr));
-            if (!subscribed) {
-              return res.status(403).json({
-                error: `Подпишись на @${CHANNEL_USERNAME} для доступа.`,
-                needSubscription: true,
-              });
-            }
-          }
         }
 
         if (mode === 'check_demo') {

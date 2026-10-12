@@ -389,8 +389,12 @@ export function applyGroupAccessToUser(
   next._migrated_subjects = true;
 
   const healed = applyFacultyHeals(next);
-  let finalUser = healed;
-  let finalChanged = changed || healed !== user;
+  // healed — всегда новый объект (копия user), поэтому сравнение по ссылке
+  // давало «изменилось» на каждом вызове: каждый запрос контента и входа
+  // заново записывал пользователя в Redis. Сравниваем по содержимому и, если
+  // ничего не поменялось, возвращаем исходный объект.
+  let finalChanged = changed || JSON.stringify(healed) !== JSON.stringify(user);
+  let finalUser = finalChanged ? healed : user;
 
   const previouslyGranted = getActiveGroupGrantedSubjectIds(user, nowMs);
   const newlyGranted = grantedSubjects.filter(id => !previouslyGranted.includes(id));
