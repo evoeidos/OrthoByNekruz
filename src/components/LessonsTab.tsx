@@ -13,6 +13,12 @@ import type {
 import { ReadingImages, useImageZoom } from '@/components/ImageZoom';
 import { TermAtlas } from '@/components/TermAtlas';
 import { getSubject } from '@/lib/subjects';
+import { UniLibraryTab } from '@/components/UniLibraryTab';
+import { EMPTY_UNI } from '@/lib/uniHelpers';
+import { postUniData } from '@/lib/uniCache';
+
+/** Особый пункт ленты: дисциплины студента с сайта КрасГМУ (после привязки аккаунта). */
+const KRASGMU_CHIP = '__krasgmu__';
 
 // Локальная копия подписей: импорт значения из curriculum притащил бы в
 // клиентский бандл все планы кафедр из файлов.
@@ -139,6 +145,11 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
   // с предмета, выбранного в приложении, на любой другой из этого списка.
   const [lessonSubject, setLessonSubject] = useState(subject);
   const [lessonSubjects, setLessonSubjects] = useState<LessonSubjectOption[]>([]);
+  // Привязан ли аккаунт КрасГМУ: тогда во вкладке есть настоящие дисциплины
+  // студента с сайта университета — для любого факультета, без ручных планов.
+  const [uniStatus, setUniStatus] = useState<'checking' | 'bound' | 'unbound'>('checking');
+  const [showKrasgmu, setShowKrasgmu] = useState(false);
+  const autoKrasgmuFor = useRef<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [readingId, setReadingId] = useState<string | null>(null);
@@ -171,7 +182,19 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
     }
   }, [lessonSubject]);
 
-  useEffect(() => { setLessonSubject(subject); }, [subject]);
+  useEffect(() => {
+    setLessonSubject(subject);
+    setShowKrasgmu(false);
+    autoKrasgmuFor.current = null;
+  }, [subject]);
+
+  useEffect(() => {
+    let cancelled = false;
+    postUniData({ action: 'status' })
+      .then(({ ok, data }) => { if (!cancelled) setUniStatus(ok && data.bound ? 'bound' : 'unbound'); })
+      .catch(() => { if (!cancelled) setUniStatus('unbound'); });
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => { void load(); }, [load]);
 
   const subjects = useMemo(() => buildSubjectViews(programs), [programs]);
@@ -179,6 +202,35 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
   const view = useMemo(
     () => subjects.find(s => s.subjectId === lessonSubject) ?? null,
     [subjects, lessonSubject],
+  );
+
+  // Плана кафедры по предмету нет (или не указана группа), а КрасГМУ привязан —
+  // сразу показываем дисциплины с сайта университета. Один раз на предмет,
+  // дальше студент переключает сам.
+  useEffect(() => {
+    if (loading || uniStatus !== 'bound' || autoKrasgmuFor.current === lessonSubject) return;
+    autoKrasgmuFor.current = lessonSubject;
+    if (!studyGroup || !view) setShowKrasgmu(true);
+  }, [loading, uniStatus, studyGroup, view, lessonSubject]);
+
+  const chipOptions = useMemo<LessonSubjectOption[]>(
+    () => [{ id: KRASGMU_CHIP, label: '🎓 Мои дисциплины', color: 'var(--c-primary)' }, ...lessonSubjects],
+    [lessonSubjects],
+  );
+  const selectChip = useCallback((id: string) => {
+    if (id === KRASGMU_CHIP) {
+      setShowKrasgmu(true);
+      return;
+    }
+    setShowKrasgmu(false);
+    setLessonSubject(id);
+  }, []);
+  const chips = (
+    <SubjectChips
+      options={chipOptions}
+      active={showKrasgmu ? KRASGMU_CHIP : lessonSubject}
+      onSelect={selectChip}
+    />
   );
 
   useEffect(() => {
@@ -250,6 +302,26 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
     setReadingId(next.lesson.id);
   }, [view, readingIndex]);
 
+  if (showKrasgmu) {
+    return (
+      <div className="flex flex-col h-full">
+        {chips}
+        <div
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-2 space-y-3"
+          style={{ paddingBottom: 'var(--scroll-pb, 96px)' }}
+        >
+          <div className="text-[12px] leading-snug px-1" style={{ color: 'var(--c-muted)' }}>
+            Твои дисциплины с сайта КрасГМУ: темы занятий и методички к ним.
+          </div>
+          <UniLibraryTab
+            uni={{ ...EMPTY_UNI, checking: uniStatus === 'checking', bound: uniStatus === 'bound' }}
+            onBind={onOpenProfile ?? (() => {})}
+          />
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <EmptyState
@@ -271,11 +343,16 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
 
   if (!studyGroup) {
     return (
-      <EmptyState
-        title="Сначала укажи группу"
-        text="Занятия приходят из плана кафедры для конкретной группы. Как только группа будет указана, здесь появится весь курс."
-        action={onOpenProfile ? { label: 'В профиль', onClick: onOpenProfile } : undefined}
-      />
+      <div className="flex flex-col h-full">
+        {chips}
+        <div className="flex-1 min-h-0">
+          <EmptyState
+            title="Сначала укажи группу"
+            text="Планы кафедр приходят для конкретной группы. А свои дисциплины с сайта университета можно открыть в «🎓 Мои дисциплины» — после привязки аккаунта КрасГМУ."
+            action={onOpenProfile ? { label: 'В профиль', onClick: onOpenProfile } : undefined}
+          />
+        </div>
+      </div>
     );
   }
 
@@ -284,16 +361,14 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
     const others = lessonSubjects.filter(o => o.id !== lessonSubject);
     return (
       <div className="flex flex-col h-full">
-        {lessonSubjects.length > 0 && (
-          <SubjectChips options={lessonSubjects} active={lessonSubject} onSelect={setLessonSubject} />
-        )}
+        {chips}
         <div className="flex-1 min-h-0">
           {subjectLabel ? (
             <EmptyState
               title={`Занятия по предмету «${subjectLabel}» готовятся`}
               text={others.length > 0
-                ? 'План кафедры по этому предмету ещё не добавлен. Пока можно открыть занятия по другим предметам курса — они выше.'
-                : 'План кафедры по этому предмету ещё не добавлен. Он появится здесь, как только будет готов.'}
+                ? 'План кафедры по этому предмету ещё не добавлен. Пока можно открыть «🎓 Мои дисциплины» с сайта КрасГМУ или другие предметы курса — они выше.'
+                : 'План кафедры по этому предмету ещё не добавлен. Пока можно открыть «🎓 Мои дисциплины» с сайта КрасГМУ — вкладка выше.'}
               action={{ label: 'Обновить', onClick: () => void load() }}
             />
           ) : (
@@ -313,9 +388,7 @@ export const LessonsTab = ({ subject, onOpenProfile }: {
 
   return (
     <div className="flex flex-col h-full">
-      {lessonSubjects.length > 1 && (
-        <SubjectChips options={lessonSubjects} active={lessonSubject} onSelect={setLessonSubject} />
-      )}
+      {chips}
       <div
         className="flex-shrink-0 px-4 pt-4 pb-3"
         style={{ borderBottom: '1px solid var(--c-border)' }}
