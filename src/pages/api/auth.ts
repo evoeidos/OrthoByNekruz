@@ -383,6 +383,14 @@ function previewPayload(
   };
 }
 
+/** С прошлого визита прошло больше 5 минут — пора обновить lastLogin/lastActivityAt. */
+const VISIT_TOUCH_MS = 5 * 60 * 1000;
+function isVisitStale(user: any): boolean {
+  if (!user || typeof user !== 'object') return false;
+  const last = Date.parse(String(user.lastLogin || ''));
+  return !Number.isFinite(last) || Date.now() - last > VISIT_TOUCH_MS;
+}
+
 async function saveUser(tgId: string, user: any) {
   const { user: healed } = healUserFacultyFields(user);
   await redis.set(`user_id:${tgId}`, healed);
@@ -962,8 +970,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
           const healedCheck = await healAndMaybePersistUser(tgIdStr, user, redisOk);
 
+          // Время визита — для сортировки «последняя активность» в админке (без
+          // поиска она показывает 50 самых активных). Раньше его обновляла
+          // лишняя запись на каждом запросе; теперь — не чаще раза в 5 минут.
+          let checkedUser = healedCheck.user;
+          if (redisOk && !healedCheck.accessHealed && isVisitStale(checkedUser)) {
+            checkedUser = touchUserVisit(checkedUser);
+            await saveUser(tgIdStr, checkedUser);
+          }
+
           return res.status(200).json(await subjectsResponse(
-            healedCheck.user,
+            checkedUser,
             tgIdStr,
             { accessHealed: healedCheck.accessHealed },
           ));
