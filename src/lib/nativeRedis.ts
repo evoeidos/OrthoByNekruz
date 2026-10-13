@@ -121,14 +121,24 @@ export class NativeRedisClient {
   }
 }
 
+// Без таймаутов команда на «подвисшем» соединении (обрыв сети, смена адреса)
+// ждала бесконечно: так снятие блокировки пользователя заняло 99 с. Теперь
+// зависшая команда через 5 с завершается ошибкой, а вызывающий код её
+// обрабатывает (деградация, повтор).
+const CLIENT_TIMEOUTS = {
+  maxRetriesPerRequest: 2,
+  lazyConnect: true,
+  connectTimeout: 5_000,
+  commandTimeout: 5_000,
+} as const;
+
 export function createNativeRedisFromEnv(): NativeRedisClient {
   const url = process.env.REDIS_URL?.trim();
   let client: Redis;
 
   if (url) {
     client = new Redis(url, {
-      maxRetriesPerRequest: 2,
-      lazyConnect: true,
+      ...CLIENT_TIMEOUTS,
     });
   } else {
     const host = process.env.REDIS_HOST?.trim();
@@ -143,8 +153,7 @@ export function createNativeRedisFromEnv(): NativeRedisClient {
       port,
       username,
       password,
-      maxRetriesPerRequest: 2,
-      lazyConnect: true,
+      ...CLIENT_TIMEOUTS,
     });
   }
 

@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import { monitorEventLoopDelay } from 'perf_hooks';
 import type { AppRedis } from '@/lib/redis';
 import { alertAdmin } from '@/lib/alertAdmin';
+import { processSnapshot } from '@/lib/processHealth';
 import { maskKey, newRedisCallStats, runWithRedisStats, type RedisCallStats } from '@/lib/redisStats';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -54,6 +55,7 @@ function reportSlowHold(tgId: string, heldMs: number, label: string, stats: Redi
     `Redis: ${stats.calls} обращений, ${Math.round(stats.totalMs)} мс суммарно`,
     `самое медленное: ${slowest}`,
     `задержка процесса (макс.): ${loopMaxMs} мс`,
+    processSnapshot(),
   ].join('\n');
   console.warn('[userLock] блокировка удерживалась долго', heldMs, detail);
   // Отдельный счётчик на студента: иначе алерт по одному глушил остальных.

@@ -1,6 +1,7 @@
 import { Redis } from '@upstash/redis';
 import { createNativeRedisFromEnv, type NativeRedisClient } from '@/lib/nativeRedis';
 import { recordRedisCall } from '@/lib/redisStats';
+import { startProcessHealthMonitor } from '@/lib/processHealth';
 
 /** Общий контракт Redis для Upstash REST и Timeweb TCP (ioredis). */
 export type AppRedis = {
@@ -41,6 +42,9 @@ const globalForRedis = globalThis as unknown as { __appRedis?: AppRedis };
 export function createRedisFromEnv(): AppRedis {
   if (!globalForRedis.__appRedis) {
     globalForRedis.__appRedis = withCallTiming(buildRedisFromEnv());
+    // Redis создаётся первым делом в любом API — отсюда и запускаем детектор
+    // замираний процесса (один на процесс).
+    startProcessHealthMonitor();
   }
   return globalForRedis.__appRedis;
 }
