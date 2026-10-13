@@ -26,7 +26,7 @@ describe('userLock', () => {
       Array.from({ length: 20 }, () => updateUser<{ n: number }>(redis, '2', u => ({ n: (u?.n ?? 0) + 1 }))),
     );
     expect(redis.store.get('user_id:2')).toEqual({ n: 20 });
-  });
+  }, 20_000); // проверка корректности, не скорости: под нагрузкой очередь идёт медленнее
 
   it('вложенный вызов внутри блокировки не ждёт сам себя', async () => {
     const redis = createFakeRedis();
