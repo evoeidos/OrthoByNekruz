@@ -26,9 +26,8 @@ function nearestDot(x: number, y: number): number | null {
   return null;
 }
 
-function patternsEqual(a: number[], b: number[]): boolean {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
-}
+/** Короче — заведомо не ключ, на сервер не отправляем. */
+const MIN_PATTERN_LENGTH = 4;
 
 type Theme = {
   accent: string;
@@ -39,16 +38,17 @@ type Theme = {
   surfaceAlt: string;
 };
 
+/**
+ * Графический ключ. Сам ключ на клиенте не хранится: нарисованные точки
+ * уходят в onSubmit ("24586"), сервер сверяет их с ADMIN_SECRET.
+ * onSubmit возвращает true, если ключ принят.
+ */
 export function AdminPatternLock({
-  expectedPattern,
-  onSuccess,
-  onFail,
+  onSubmit,
   disabled,
   theme,
 }: {
-  expectedPattern: number[];
-  onSuccess: () => void;
-  onFail?: () => void;
+  onSubmit: (pattern: string) => Promise<boolean>;
   disabled?: boolean;
   theme: Theme;
 }) {
@@ -82,20 +82,19 @@ export function AdminPatternLock({
     return { x: clientX - rect.left, y: clientY - rect.top };
   }, []);
 
-  const finishPattern = useCallback((finalPattern: number[]) => {
-    if (patternsEqual(finalPattern, expectedPattern)) {
-      setFailed(false);
-      reset();
-      onSuccess();
-      return;
-    }
+  const showFailure = useCallback(() => {
     setFailed(true);
-    onFail?.();
     window.setTimeout(() => {
       setFailed(false);
       reset();
     }, 450);
-  }, [expectedPattern, onFail, onSuccess, reset]);
+  }, [reset]);
+
+  const finishPattern = useCallback(async (finalPattern: number[]) => {
+    if (finalPattern.length < MIN_PATTERN_LENGTH) { showFailure(); return; }
+    const ok = await onSubmit(finalPattern.join(''));
+    if (ok) { setFailed(false); reset(); } else showFailure();
+  }, [onSubmit, reset, showFailure]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (disabled) return;
@@ -125,17 +124,7 @@ export function AdminPatternLock({
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* ok */ }
     setDragging(false);
     setCursor(null);
-    const finalPattern = patternRef.current;
-    if (finalPattern.length >= expectedPattern.length) {
-      finishPattern(finalPattern);
-    } else {
-      setFailed(true);
-      onFail?.();
-      window.setTimeout(() => {
-        setFailed(false);
-        reset();
-      }, 450);
-    }
+    void finishPattern(patternRef.current);
   };
 
   const lineColor = failed ? theme.danger : theme.accent;
@@ -220,15 +209,3 @@ export function AdminPatternLock({
     </div>
   );
 }
-
-export const ADMIN_PATTERN = [2, 4, 5, 8, 6] as const;
-
-// ВНИМАНИЕ: это НЕ граница безопасности.
-// Значение попадает в клиентский бандл, поэтому любой может его извлечь.
-// Реальная проверка прав админа — на сервере (src/lib/adminAuth.ts):
-// подпись Telegram initData + совпадение user.id с ADMIN_TG_ID.
-// Графический ключ и этот секрет — только UX-гейт от случайного захода.
-// Значение должно совпадать с серверным ADMIN_SECRET; задаётся через env,
-// чтобы можно было ротировать без правки кода.
-export const ADMIN_UNLOCK_SECRET =
-  process.env.NEXT_PUBLIC_ADMIN_SECRET || 'ortho2000secret';

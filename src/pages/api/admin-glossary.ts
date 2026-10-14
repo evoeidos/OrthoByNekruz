@@ -4,6 +4,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
 import { verifyAdminRequest } from '@/lib/adminAuth';
+import { getSubject } from '@/lib/subjects';
 
 const redis        = createRedisFromEnv();
 
@@ -34,7 +35,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const auth = verifyAdminRequest(req);
   if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-  if (!subjectId) return res.status(400).json({ error: 'subjectId required' });
+  if (!getSubject(String(subjectId ?? ''))) return res.status(400).json({ error: 'Unknown subject' });
 
   if (action === 'list') {
     const entries = await getEntries(subjectId);
@@ -45,11 +46,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!entry?.term?.trim() || !entry?.definition?.trim()) {
       return res.status(400).json({ error: 'term and definition required' });
     }
+    const image = entry.image ? String(entry.image).trim() : '';
+    // Картинка — https-ссылка или путь сайта (/images/…): javascript:/data: не пускаем.
+    if (image && !/^(https:\/\/|\/(?!\/))[^\s"'<>]+$/i.test(image)) {
+      return res.status(400).json({ error: 'Картинка: ссылка https://… или путь /images/…' });
+    }
     const newEntry: GlossaryEntry = {
       id:         `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      term:       String(entry.term).trim(),
-      definition: String(entry.definition).trim(),
-      image:      entry.image ? String(entry.image).trim() : undefined,
+      term:       String(entry.term).trim().slice(0, 200),
+      definition: String(entry.definition).trim().slice(0, 4000),
+      image:      image || undefined,
     };
     const entries = await getEntries(subjectId);
     entries.push(newEntry);

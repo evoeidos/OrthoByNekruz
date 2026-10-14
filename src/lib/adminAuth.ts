@@ -4,10 +4,11 @@
 //
 // ЕДИНАЯ ПРОВЕРКА ПРАВ АДМИНА ДЛЯ ВСЕХ /api/admin-* РОУТОВ.
 //
-// Раньше проверка была продублирована в 5 роутах, а ещё 9 роутов проверяли
-// только `secret`. Секрет уходит в клиентский бандл, поэтому одного секрета
-// недостаточно — обязательна вторая проверка: подпись Telegram initData,
-// внутри которой user.id должен совпасть с ADMIN_TG_ID.
+// Два фактора:
+//   1. подпись Telegram initData, внутри которой user.id = ADMIN_TG_ID;
+//   2. графический ключ — клиент шлёт цифры точек (например "24586") как
+//      `secret`, сервер сверяет с ADMIN_SECRET. В клиентском бандле ключа нет.
+// Подпись проверяется первой: подбирать ключ может только сам админ.
 //
 // Использование в роуте:
 //   const auth = verifyAdminRequest(req);
@@ -69,9 +70,6 @@ export function verifyAdminRequest(req: NextApiRequest): AdminAuthResult {
 
   const { secret, initData } = extractCredentials(req);
 
-  if (!secretMatches(secret)) {
-    return { ok: false, status: 401, error: 'Unauthorized' };
-  }
   if (!initData) {
     return { ok: false, status: 401, error: 'Нет Telegram initData — открой админку через бота.' };
   }
@@ -79,6 +77,10 @@ export function verifyAdminRequest(req: NextApiRequest): AdminAuthResult {
   const tgUser = verifyInitDataUser(initData, BOT_TOKEN);
   if (!tgUser || String(tgUser.id) !== ADMIN_TG_ID) {
     return { ok: false, status: 403, error: 'Forbidden' };
+  }
+
+  if (!secretMatches(secret)) {
+    return { ok: false, status: 401, error: 'Неверный графический ключ' };
   }
 
   return { ok: true, tgId: String(tgUser.id) };

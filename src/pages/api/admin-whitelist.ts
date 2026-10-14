@@ -24,8 +24,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (action === 'add') {
-    if (!tgId) return res.status(400).json({ error: 'tgId required' });
-    await redis.sadd(WL_KEY, String(tgId));
+    if (!/^\d{5,15}$/.test(String(tgId ?? '').trim())) {
+      return res.status(400).json({ error: 'Telegram ID — только цифры' });
+    }
+    await redis.sadd(WL_KEY, String(tgId).trim());
     return res.status(200).json({ ok: true });
   }
 

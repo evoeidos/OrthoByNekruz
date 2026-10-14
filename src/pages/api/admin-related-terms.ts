@@ -58,7 +58,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'type must be questions|tests|tasks' });
   }
 
-  if (!subjectId) return res.status(400).json({ error: 'subjectId required' });
+  if (!getSubject(String(subjectId ?? ''))) return res.status(400).json({ error: 'Unknown subject' });
 
   // ── Загрузить список элементов (id + preview) ─────────────────────────────
   if (action === 'load_items') {
@@ -87,9 +87,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!itemId) return res.status(400).json({ error: 'itemId required' });
     if (!Array.isArray(terms)) return res.status(400).json({ error: 'terms must be array' });
 
-    const cleanTerms = (terms as unknown[])
-      .map(t => String(t).trim())
-      .filter(Boolean);
+    const cleanTerms = [...new Set((terms as unknown[])
+      .map(t => String(t).trim().slice(0, 200))
+      .filter(Boolean))].slice(0, 50);
 
     const overrides = await getOverrides(subjectId, sectionType);
 

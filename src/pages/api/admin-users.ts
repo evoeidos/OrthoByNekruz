@@ -1,13 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
 import {
-  SUBJECTS, getSubject, getUserAvailableSubjects, migrateUserSubjects, applyBioTasksGift,
+  SUBJECTS, getSubject, migrateUserSubjects, applyBioTasksGift,
   ensureStomatologyBioTasksVisible,
   ensurePedTherBioTasksVisible,
   ensurePedTherChemTasksVisible,
 } from '@/lib/subjects';
 import {
-  confirmPreviewUser,
   confirmPreviewModule,
   rejectPreviewModule,
   getEffectiveUserSubjects,
@@ -24,9 +23,10 @@ import {
   adminForcePaymentOnlyScreen,
   resetPreviewDemoAccess,
   adminGrantDirectAccess,
+  type DirectGrantItem,
 } from '@/lib/preview';
 import { applyGroupAccessToUser, loadGroupAccessRules } from '@/lib/groupAccess';
-import type { PreviewModule } from '@/lib/previewModules';
+import { normalizePreviewModules, type PreviewModule } from '@/lib/previewModules';
 import { clearAuthRateLimitsForTgId } from '@/lib/authRateLimit';
 import { verifyAdminRequest } from '@/lib/adminAuth';
 import { isUserLockTimeout, withUserLock } from '@/lib/userLock';
@@ -37,11 +37,8 @@ import { resolveLastActivityIso } from '@/lib/userActivity';
 import { facultyDisplayFromUser, healUserFacultyFields } from '@/lib/facultyCodes';
 import { buildStudyGroupFromDigits, normalizeStudyGroup } from '@/lib/studyGroup';
 
-const redis        = createRedisFromEnv();
-const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
-const ADMIN_TG_ID  = process.env.ADMIN_TG_ID || '978243325';
-const BOT_TOKEN    = process.env.BOT_TOKEN    || '';
-const PAGE_SIZE    = 50;
+const redis     = createRedisFromEnv();
+const PAGE_SIZE = 50;
 
 type ListFilter = 'all' | 'blocked' | 'suspicious' | 'demo' | 'unpaid';
 type ListSort   = 'registered' | 'lastActivity' | 'lastLogin' | 'loginCount';
@@ -117,55 +114,39 @@ function toListUser(
   };
 }
 
+/** Карточка в развёрнутом виде — то же плюс время начала пробника. */
 function toDetailUser(
   id: string,
   user: any,
   opensToday: number,
   usedDemo: boolean,
 ) {
-  user = ensureSubjects(user);
-  const facultyDisplay = facultyDisplayFromUser(user);
-  const userSubjects = getEffectiveUserSubjects(user);
   return {
-    tgId:          id,
-    username:      user.username      ?? null,
-    firstName:     user.firstName     ?? null,
-    lastName:      user.lastName      ?? null,
-    blocked:       user.blocked === true,
-    blockedReason: user.blockedReason ?? null,
-    blockedAt:     user.blockedAt     ?? null,
-    subjects:      userSubjects,
-    hasMicro:      userSubjects.includes('micro'),
-    usedDemo,
-    previewStatus:        user.previewStatus        ?? null,
-    previewChosenSubject: user.previewChosenSubject ?? null,
-    previewChosenModules: Array.isArray(user.previewChosenModules) ? user.previewChosenModules : null,
-    previewDisplayModules: getPreviewChosenModulesForAdmin(user),
-    promoCode:            user.promoCode            ?? facultyDisplay?.code ?? null,
-    facultyId:            user.facultyId            ?? facultyDisplay?.facultyId ?? null,
-    previewFaculty:       user.previewFaculty       ?? null,
-    facultyDisplayLabel:  facultyDisplay?.label     ?? null,
-    facultyDisplayCode:   facultyDisplay?.code      ?? null,
-    facultyIcon:          facultyDisplay?.icon      ?? null,
-    previewStartedAt:     user.previewStartedAt     ?? null,
-    previewConfirmedAt:   user.previewConfirmedAt   ?? null,
-    previewQuotedPrice:   typeof user.previewQuotedPrice === 'number' ? user.previewQuotedPrice : null,
-    receiptClaimedAt:     user.receiptClaimedAt     ?? null,
-    previewNeedsConfirm:  previewChoiceNeedsAdminConfirm(user),
-    previewPendingModules: getPendingAdminModules(user),
-    previewIsAddon:       previewChoiceIsAddon(user),
-    contactUsername:      user.contactUsername      ?? null,
-    studyGroup:           user.studyGroup           ?? null,
-    activatedKey:  user.activatedKey  ?? null,
-    registeredAt:    user.date          ?? null,
-    lastLogin:       user.lastLogin     ?? null,
-    lastActivityAt:  resolveLastActivityIso(user),
-    loginCount:      Number(user.loginCount) || 0,
-    opensToday,
-    suspicious:    isSuspicious(opensToday),
-    navHidden:     (user.navHidden && typeof user.navHidden === 'object') ? user.navHidden : {},
-    paid:          user.paid === true,
+    ...toListUser(id, user, opensToday, usedDemo),
+    previewStartedAt: user.previewStartedAt ?? null,
   };
+}
+
+async function loadDetail(id: string, user: any) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [opens, demo] = await Promise.all([
+    redis.get(`opens:${id}:${today}`),
+    redis.sismember('used_demo_ids', id),
+  ]);
+  return toDetailUser(id, user, Number(opens) || 0, Boolean(demo));
+}
+
+/** Разбор выбора админа для «Открыть доступ»: [{ subject, modules }]. */
+function parseGrantPlan(raw: unknown): DirectGrantItem[] | null {
+  if (!Array.isArray(raw)) return null;
+  const plan: DirectGrantItem[] = [];
+  for (const item of raw) {
+    const id = String((item as any)?.subject ?? '').trim();
+    const modules = normalizePreviewModules((item as any)?.modules);
+    if (!getSubject(id) || modules.length === 0) continue;
+    plan.push({ id, modules });
+  }
+  return plan;
 }
 
 /** Админ ещё не отметил оплату (в т.ч. заявка до подтверждения доступа). */
@@ -248,26 +229,178 @@ async function buildUserList(ids: string[]) {
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const pipeline1 = redis.pipeline();
-  for (const id of ids) pipeline1.get(`user_id:${id}`);
-  const rawUsers = await pipeline1.exec();
-
-  const pipeline2 = redis.pipeline();
+  // Один проход: на каждого пользователя — запись, открытия за сегодня, демо.
+  const pipeline = redis.pipeline();
   for (const id of ids) {
-    pipeline2.get(`opens:${id}:${today}`);
+    pipeline.get(`user_id:${id}`);
+    pipeline.get(`opens:${id}:${today}`);
+    pipeline.sismember('used_demo_ids', id);
   }
-  const opensData = await pipeline2.exec();
+  const rows = await pipeline.exec();
 
-  const pipeline3 = redis.pipeline();
-  for (const id of ids) pipeline3.sismember('used_demo_ids', id);
-  const demoData = await pipeline3.exec();
-
-  return ids.map((id, i) => {
-    const user      = (rawUsers[i] as any) ?? {};
-    const opens     = Number(opensData[i]) || 0;
-    const usedDemo  = Boolean(demoData[i]);
-    return toListUser(id, user, opens, usedDemo);
+  const list: ReturnType<typeof toListUser>[] = [];
+  ids.forEach((id, i) => {
+    const user = rows[i * 3] as any;
+    // Индекс мог отстать от удалённой записи — такую строку не показываем.
+    if (!user || typeof user !== 'object') return;
+    list.push(toListUser(id, user, Number(rows[i * 3 + 1]) || 0, Boolean(rows[i * 3 + 2])));
   });
+  return list;
+}
+
+const ADMIN_PREVIEW_MODULES: PreviewModule[] = ['questions', 'tests', 'tasks'];
+const NAV_SECTION_IDS = ['lessons', 'questions', 'tests', 'tasks', 'exam', 'materials'];
+
+type ActionResult = { user: any } | { error: string };
+
+/**
+ * Действие админа над одним пользователем: возвращает новую запись (или ту же,
+ * если менять нечего) либо текст ошибки. Запись и ответ — в обработчике.
+ */
+async function applyUserAction(
+  user: any,
+  action: string,
+  body: Record<string, any>,
+): Promise<ActionResult> {
+  switch (action) {
+    case 'block':
+      return {
+        user: {
+          ...user,
+          blocked:       true,
+          blockedReason: String(body.reason ?? '').trim().slice(0, 200) || 'manual',
+          blockedAt:     new Date().toISOString(),
+        },
+      };
+
+    case 'unblock': {
+      const updated = { ...user };
+      delete updated.blocked;
+      delete updated.blockedReason;
+      delete updated.blockedAt;
+      return { user: updated };
+    }
+
+    case 'toggle_subject': {
+      const subjectId = String(body.subject || '').trim();
+      const enabled = body.enable === true;
+      if (!getSubject(subjectId)) return { error: `Неизвестный предмет: ${subjectId}` };
+
+      const subjects = { ...(user.subjects || {}) };
+      for (const s of SUBJECTS) if (!(s.id in subjects)) subjects[s.id] = false;
+      subjects[subjectId] = enabled;
+
+      // Предмет выдаётся с закрытыми разделами: их админ включает ниже в
+      // карточке (или сразу через «Открыть доступ» с выбором разделов).
+      const navHidden: Record<string, string[]> = { ...(user.navHidden || {}) };
+      if (enabled) navHidden[subjectId] = ['questions', 'tests', 'tasks', 'exam', 'materials'];
+      else delete navHidden[subjectId];
+
+      const updated: any = { ...user, subjects, navHidden, _migrated_subjects: true };
+      if (enabled) updated[`${subjectId}_grantedAt`] = new Date().toISOString();
+      else delete updated[`${subjectId}_grantedAt`];
+
+      if (subjectId === 'micro') {
+        if (enabled) {
+          updated.micro = true;
+          updated.microGrantedAt = new Date().toISOString();
+        } else {
+          delete updated.micro;
+          delete updated.microGrantedAt;
+          delete updated.microKey;
+          delete updated.microDate;
+        }
+      }
+      return { user: applyAdminAccessHeals(updated) };
+    }
+
+    case 'toggle_section': {
+      const subjectId = String(body.subject || '').trim();
+      const sectionId = String(body.section || '').trim();
+      const enabled = body.enable === true;
+      if (!getSubject(subjectId) || !NAV_SECTION_IDS.includes(sectionId)) {
+        return { error: 'Неизвестный предмет или раздел' };
+      }
+      const navHidden: Record<string, string[]> = { ...(user.navHidden || {}) };
+      const hidden = new Set<string>(navHidden[subjectId] || []);
+      if (enabled) hidden.delete(sectionId); else hidden.add(sectionId);
+      if (hidden.size === 0) delete navHidden[subjectId]; else navHidden[subjectId] = [...hidden];
+      return { user: applyAdminAccessHeals({ ...user, navHidden }) };
+    }
+
+    case 'grant_direct_access': {
+      const plan = parseGrantPlan(body.grants);
+      if (plan && plan.length === 0) return { error: 'Выбери хотя бы один предмет и раздел.' };
+      const granted = adminGrantDirectAccess(user, plan ?? undefined);
+      if (!granted) return { error: 'Студент ещё не выбрал предмет — отметь предметы и разделы вручную.' };
+      let updated = granted;
+      try {
+        updated = applyGroupAccessToUser(updated, await loadGroupAccessRules(redis)).user;
+      } catch { /* групповые правила — best effort */ }
+      return { user: applyAdminAccessHeals(updated) };
+    }
+
+    case 'force_payment_only': {
+      const updated = adminForcePaymentOnlyScreen(user);
+      if (!updated) return { error: 'Нет предмета для оплаты: студент ничего не выбирал и доступов нет.' };
+      return { user: updated };
+    }
+
+    case 'reopen_preview_vitrine': {
+      const updated = reopenPreviewVitrine(user);
+      if (!updated) return { error: 'Не удалось вернуть на витрину' };
+      return { user: updated };
+    }
+
+    case 'confirm_preview_module':
+    case 'reject_preview_module': {
+      const mod = String(body.module || '').trim() as PreviewModule;
+      if (!ADMIN_PREVIEW_MODULES.includes(mod)) return { error: 'Неизвестный раздел.' };
+      if (!user.previewChosenSubject) return { error: 'Студент не выбрал предмет' };
+      const updated = action === 'confirm_preview_module'
+        ? confirmPreviewModule(user, mod)
+        : rejectPreviewModule(user, mod);
+      if (!updated) return { error: 'Заявка по этому разделу уже обработана — обнови список.' };
+      return { user: updated };
+    }
+
+    // Сменить закреплённую группу (студент сам её поменять не может — см.
+    // set_study_group в auth.ts). Цифры группы, буква факультета — по студенту.
+    case 'set_study_group': {
+      const facultyId = String(user.facultyId || '').trim() || null;
+      const built = buildStudyGroupFromDigits(String(body.studyGroup ?? ''), facultyId);
+      if (!built) {
+        return { error: facultyId ? 'Введи номер группы цифрами, например 108' : 'У студента не выбран факультет' };
+      }
+      const group = normalizeStudyGroup(built);
+      const rules = await loadGroupAccessRules(redis);
+      return {
+        user: applyGroupAccessToUser({ ...user, studyGroup: group, lockedStudyGroup: group }, rules).user,
+      };
+    }
+
+    case 'toggle_paid': {
+      const paid = !user.paid;
+      const updated = { ...user, paid };
+      return { user: paid ? healStalePreviewForFinalizedUser(updated) : updated };
+    }
+
+    case 'set_contact_username': {
+      const raw = String(body.contactUsername ?? '').trim();
+      const updated: Record<string, unknown> = { ...user };
+      if (!raw) {
+        delete updated.contactUsername;
+      } else {
+        const handle = normalizeTelegramUsername(raw);
+        if (!isValidTelegramUsername(handle)) return { error: 'Некорректный username (5–32 символа, латиница)' };
+        updated.contactUsername = handle;
+      }
+      return { user: updated };
+    }
+
+    default:
+      return { error: 'Неизвестное действие' };
+  }
 }
 
 /**
@@ -296,11 +429,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 async function handleAdminUsers(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const {
-    action, tgId, subject, enable, reason, section, contactUsername: contactUsernameRaw,
-    studyGroup: studyGroupRaw,
-    page, limit, filter, q, sortBy, sortDir,
-  } = req.body ?? {};
+  const { action, tgId, page, filter, q, sortBy, sortDir } = req.body ?? {};
 
   const auth = verifyAdminRequest(req);
   if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
@@ -348,390 +477,27 @@ async function handleAdminUsers(req: NextApiRequest, res: NextApiResponse) {
         user = facultyHeal.user;
       }
 
-      const today = new Date().toISOString().slice(0, 10);
-      const opensToday = Number(await redis.get(`opens:${id}:${today}`)) || 0;
-      const usedDemo   = Boolean(await redis.sismember('used_demo_ids', id));
-
-      return res.status(200).json({
-        user: toDetailUser(id, user, opensToday, usedDemo),
-      });
+      return res.status(200).json({ user: await loadDetail(id, user) });
     }
 
     if (action && tgId) {
-      let user: any = await redis.get(`user_id:${tgId}`);
-      if (!user && action !== 'reset_demo' && action !== 'delete_user') {
-        return res.status(404).json({ error: 'User not found' });
-      }
+      const id = String(tgId).trim();
+      let user: any = await redis.get(`user_id:${id}`);
       if (user) user = ensureSubjects(user);
 
-      if (action === 'block') {
-        const cleanReason = String(reason ?? '').trim().slice(0, 200) || 'manual';
-        await saveUser(String(tgId), {
-          ...user,
-          blocked:       true,
-          blockedReason: cleanReason,
-          blockedAt:     new Date().toISOString(),
-        });
-        return res.status(200).json({ ok: true });
-      }
-
-      if (action === 'unblock') {
-        const updated: Record<string, any> = { ...user };
-        delete updated.blocked;
-        delete updated.blockedReason;
-        delete updated.blockedAt;
-        await saveUser(String(tgId), updated);
-        const today = new Date().toISOString().slice(0, 10);
-        await redis.del(`opens:${tgId}:${today}`);
-        await redis.del(`opens_notified:${tgId}:${today}`);
-        return res.status(200).json({ ok: true });
-      }
-
-      if (action === 'toggle_subject') {
-        const subjectId = String(subject || '').trim();
-        const enabled   = enable === true || enable === 'true' || enable === '1';
-
-        const cfg = getSubject(subjectId);
-        if (!cfg) {
-          return res.status(400).json({ error: `Unknown subject: ${subjectId}` });
-        }
-
-        const subjects = { ...(user.subjects || {}) };
-        for (const s of SUBJECTS) {
-          if (!(s.id in subjects)) subjects[s.id] = false;
-        }
-        subjects[subjectId] = enabled;
-
-        const ALL_SECTIONS = ['questions', 'tests', 'tasks', 'exam', 'materials'];
-
-        const navHidden: Record<string, string[]> = { ...(user.navHidden || {}) };
-        if (enabled) {
-          navHidden[subjectId] = ALL_SECTIONS;
-        } else {
-          delete navHidden[subjectId];
-        }
-
-        const updated: any = { ...user, subjects, navHidden, _migrated_subjects: true };
-
-        if (enabled) {
-          updated[`${subjectId}_grantedAt`] = new Date().toISOString();
-        } else {
-          delete updated[`${subjectId}_grantedAt`];
-        }
-
-        if (subjectId === 'micro') {
-          if (enabled) {
-            updated.micro          = true;
-            updated.microGrantedAt = new Date().toISOString();
-          } else {
-            delete updated.micro;
-            delete updated.microGrantedAt;
-            delete updated.microKey;
-            delete updated.microDate;
-          }
-        }
-
-        let healed = applyAdminAccessHeals(updated);
-        if (enabled && user.paid === true) {
-          healed = applyAdminAccessHeals({ ...healed, paid: true });
-        }
-        await saveUser(String(tgId), healed);
-        return res.status(200).json({
-          ok: true,
-          subjects: getUserAvailableSubjects(healed),
-          navHidden: healed.navHidden ?? navHidden,
-          previewStatus: healed.previewStatus ?? null,
-          previewConfirmedAt: healed.previewConfirmedAt ?? null,
-          previewChosenSubject: healed.previewChosenSubject ?? null,
-        });
-      }
-
-      if (action === 'give_micro') {
-        const subjects = { ...(user.subjects || {}) };
-        for (const s of SUBJECTS) if (!(s.id in subjects)) subjects[s.id] = false;
-        subjects.micro = true;
-        await saveUser(String(tgId), {
-          ...user,
-          subjects,
-          micro:              true,
-          microGrantedAt:     new Date().toISOString(),
-          _migrated_subjects: true,
-        });
-        return res.status(200).json({ ok: true });
-      }
-
-      if (action === 'revoke_micro') {
-        const subjects = { ...(user.subjects || {}) };
-        for (const s of SUBJECTS) if (!(s.id in subjects)) subjects[s.id] = false;
-        subjects.micro = false;
-        const u: Record<string, any> = { ...user, subjects, _migrated_subjects: true };
-        delete u.micro;
-        delete u.microGrantedAt;
-        delete u.microKey;
-        delete u.microDate;
-        await saveUser(String(tgId), u);
-        return res.status(200).json({ ok: true });
-      }
-
+      // Сброс пробника и удаление работают и без записи (чистят хвосты по ID).
       if (action === 'reset_demo') {
-        const id = String(tgId).trim();
         await clearPreviewTrialLockForUser(id);
         await clearAuthRateLimitsForTgId(redis, id);
-        let cleaned: Record<string, any> | null = null;
-        if (user) {
-          const patched = resetPreviewDemoAccess(user);
-          await saveUser(id, patched);
-          cleaned = patched;
-        }
-        const today = new Date().toISOString().slice(0, 10);
-        const opensToday = Number(await redis.get(`opens:${id}:${today}`)) || 0;
-        const usedDemo   = Boolean(await redis.sismember('used_demo_ids', id));
-        const detail = cleaned ? toDetailUser(id, cleaned, opensToday, usedDemo) : null;
-        return res.status(200).json({
-          ok: true,
-          subjects: detail?.subjects ?? [],
-          navHidden: detail?.navHidden ?? {},
-          user: detail,
-        });
-      }
-
-      if (action === 'grant_direct_access') {
-        const granted = adminGrantDirectAccess(user);
-        if (!granted) {
-          return res.status(400).json({
-            error: 'Нет выбранного предмета. Попроси студента выбрать предмет или открой вручную.',
-          });
-        }
-        let updated = granted;
-        try {
-          const rules = await loadGroupAccessRules(redis);
-          const merged = applyGroupAccessToUser(updated, rules);
-          updated = merged.user;
-        } catch { /* групповые правила — best effort */ }
-        updated = applyAdminAccessHeals(updated);
-        await saveUser(String(tgId), updated);
-        const today = new Date().toISOString().slice(0, 10);
-        const opensToday = Number(await redis.get(`opens:${String(tgId)}:${today}`)) || 0;
-        const usedDemo = Boolean(await redis.sismember('used_demo_ids', String(tgId)));
-        const detail = toDetailUser(String(tgId), updated, opensToday, usedDemo);
-        return res.status(200).json({
-          ok: true,
-          subjects: getUserAvailableSubjects(updated),
-          navHidden: updated.navHidden ?? {},
-          previewStatus: null,
-          previewConfirmedAt: updated.previewConfirmedAt ?? null,
-          previewChosenSubject: null,
-          previewChosenModules: null,
-          previewNeedsConfirm: false,
-          previewPendingModules: [],
-          previewDisplayModules: [],
-          receiptClaimedAt: null,
-          paid: updated.paid === true,
-          studyGroup: updated.studyGroup ?? null,
-          user: detail,
-        });
-      }
-
-      if (action === 'force_payment_only') {
-        const updated = adminForcePaymentOnlyScreen(user);
-        if (!updated) {
-          return res.status(400).json({ error: 'Не удалось определить предмет или разделы для оплаты.' });
-        }
-        await saveUser(String(tgId), updated);
-        return res.status(200).json({
-          ok: true,
-          previewStatus: updated.previewStatus ?? null,
-          previewChosenSubject: updated.previewChosenSubject ?? null,
-          previewChosenModules: updated.previewChosenModules ?? null,
-          previewQuotedPrice: updated.previewQuotedPrice ?? null,
-          previewNeedsConfirm: previewChoiceNeedsAdminConfirm(updated),
-              previewPendingModules: getPendingAdminModules(updated),
-              previewDisplayModules: getPreviewChosenModulesForAdmin(updated),
-              previewConfirmedAt: null,
-          receiptClaimedAt: null,
-          subjects: getUserAvailableSubjects(updated),
-          navHidden: updated.navHidden ?? {},
-          paid: updated.paid === true,
-        });
-      }
-
-      if (action === 'reopen_preview_vitrine') {
-        const updated = reopenPreviewVitrine(user);
-        if (!updated) {
-          return res.status(400).json({ error: 'Не удалось вернуть на витрину' });
-        }
-        await saveUser(String(tgId), updated);
-        return res.status(200).json({
-          ok: true,
-          previewStatus: 'selecting',
-          previewChosenSubject: null,
-          previewChosenModules: null,
-          previewQuotedPrice: null,
-          receiptClaimedAt: null,
-          previewNeedsConfirm: false,
-        });
-      }
-
-      if (action === 'confirm_preview_module') {
-        const mod = String(req.body?.module || '').trim() as PreviewModule;
-        if (!['questions', 'tests', 'tasks'].includes(mod)) {
-          return res.status(400).json({ error: 'Неизвестный раздел.' });
-        }
-        if (!user?.previewChosenSubject) {
-          return res.status(400).json({ error: 'Предмет не выбран' });
-        }
-        const updated = confirmPreviewModule(user, mod);
-        if (!updated) {
-          return res.status(400).json({ error: 'Нельзя подтвердить этот раздел сейчас.' });
-        }
-        await saveUser(String(tgId), updated);
-        return res.status(200).json({
-          ok: true,
-          subjects: getUserAvailableSubjects(updated),
-          navHidden: updated.navHidden ?? {},
-          previewStatus: updated.previewStatus ?? null,
-          previewConfirmedAt: updated.previewConfirmedAt ?? null,
-          previewChosenSubject: updated.previewChosenSubject ?? null,
-          previewChosenModules: updated.previewChosenModules ?? null,
-          previewPendingModules: getPendingAdminModules(updated),
-          previewDisplayModules: getPreviewChosenModulesForAdmin(updated),
-          previewNeedsConfirm: previewChoiceNeedsAdminConfirm(updated),
-          paid: updated.paid === true,
-        });
-      }
-
-      if (action === 'reject_preview_module') {
-        const mod = String(req.body?.module || '').trim() as PreviewModule;
-        if (!['questions', 'tests', 'tasks'].includes(mod)) {
-          return res.status(400).json({ error: 'Неизвестный раздел.' });
-        }
-        if (!user?.previewChosenSubject) {
-          return res.status(400).json({ error: 'Предмет не выбран' });
-        }
-        const updated = rejectPreviewModule(user, mod);
-        if (!updated) {
-          return res.status(400).json({ error: 'Нельзя отказать по этому разделу сейчас.' });
-        }
-        await saveUser(String(tgId), updated);
-        return res.status(200).json({
-          ok: true,
-          subjects: getUserAvailableSubjects(updated),
-          navHidden: updated.navHidden ?? {},
-          previewStatus: updated.previewStatus ?? null,
-          previewConfirmedAt: updated.previewConfirmedAt ?? null,
-          previewChosenSubject: updated.previewChosenSubject ?? null,
-          previewChosenModules: updated.previewChosenModules ?? null,
-          previewPendingModules: getPendingAdminModules(updated),
-          previewDisplayModules: getPreviewChosenModulesForAdmin(updated),
-          previewNeedsConfirm: previewChoiceNeedsAdminConfirm(updated),
-          receiptClaimedAt: updated.receiptClaimedAt ?? null,
-          paid: updated.paid === true,
-        });
-      }
-
-      if (action === 'confirm_preview') {
-        if (!user?.previewChosenSubject) {
-          return res.status(400).json({ error: 'Предмет не выбран' });
-        }
-        if (hasFinalizedPreviewAccess(user)) {
-          return res.status(200).json({
-            ok: true,
-            subjects: getUserAvailableSubjects(user),
-            navHidden: user.navHidden ?? {},
-            previewConfirmedAt: user.previewConfirmedAt ?? null,
-          });
-        }
-        const pending = getPendingAdminModules(user);
-        if (pending.length === 1) {
-          const updated = confirmPreviewModule(user, pending[0]);
-          if (updated) {
-            await saveUser(String(tgId), updated);
-            return res.status(200).json({
-              ok: true,
-              subjects: getUserAvailableSubjects(updated),
-              navHidden: updated.navHidden ?? {},
-              previewStatus: updated.previewStatus ?? null,
-              previewConfirmedAt: updated.previewConfirmedAt ?? null,
-              previewChosenSubject: updated.previewChosenSubject ?? null,
-              previewChosenModules: updated.previewChosenModules ?? null,
-              previewPendingModules: getPendingAdminModules(updated),
-              previewDisplayModules: getPreviewChosenModulesForAdmin(updated),
-              previewNeedsConfirm: previewChoiceNeedsAdminConfirm(updated),
-              paid: updated.paid === true,
-            });
-          }
-        }
-        const updated = confirmPreviewUser(user);
-        if (!updated) {
-          return res.status(400).json({
-            error: 'Не удалось определить выбранные разделы. Попроси студента выбрать заново.',
-          });
-        }
-        await saveUser(String(tgId), updated);
-        return res.status(200).json({
-          ok: true,
-          subjects: getUserAvailableSubjects(updated),
-          navHidden: updated.navHidden ?? {},
-          previewStatus: null,
-          previewConfirmedAt: updated.previewConfirmedAt ?? null,
-          previewChosenSubject: updated.previewChosenSubject ?? null,
-          previewChosenModules: updated.previewChosenModules ?? null,
-          paid: updated.paid === true,
-        });
-      }
-
-      // Сменить закреплённую группу (студент сам её поменять не может — см.
-      // set_study_group в auth.ts). Цифры группы, буква факультета — по студенту.
-      if (action === 'set_study_group') {
-        const facultyId = String(user.facultyId || '').trim() || null;
-        const built = buildStudyGroupFromDigits(String(studyGroupRaw ?? ''), facultyId);
-        if (!built) {
-          return res.status(400).json({
-            error: facultyId ? 'Введи номер группы цифрами, например 108' : 'У студента не выбран факультет',
-          });
-        }
-        const group = normalizeStudyGroup(built);
-        const rules = await loadGroupAccessRules(redis);
-        const { user: updated } = applyGroupAccessToUser(
-          { ...user, studyGroup: group, lockedStudyGroup: group },
-          rules,
-        );
-        await saveUser(String(tgId), updated);
-        return res.status(200).json({ ok: true, studyGroup: group });
-      }
-
-      if (action === 'toggle_paid') {
-        const newPaid = !user.paid;
-        let updated = { ...user, paid: newPaid };
-        if (newPaid) {
-          updated = healStalePreviewForFinalizedUser(updated);
-        }
-        await saveUser(String(tgId), updated);
-        return res.status(200).json({ ok: true, paid: newPaid });
-      }
-
-      if (action === 'set_contact_username') {
-        const raw = String(contactUsernameRaw ?? reason ?? '').trim();
-        const updated: Record<string, unknown> = { ...user };
-        if (!raw) {
-          delete updated.contactUsername;
-        } else {
-          const handle = normalizeTelegramUsername(raw);
-          if (!isValidTelegramUsername(handle)) {
-            return res.status(400).json({ error: 'Некорректный username (5–32 символа, латиница)' });
-          }
-          updated.contactUsername = handle;
-        }
-        await saveUser(String(tgId), updated);
-        return res.status(200).json({
-          ok: true,
-          contactUsername: (updated.contactUsername as string | undefined) ?? null,
-        });
+        if (!user) return res.status(200).json({ ok: true, user: null });
+        const updated = resetPreviewDemoAccess(user);
+        await saveUser(id, updated);
+        return res.status(200).json({ ok: true, user: await loadDetail(id, updated) });
       }
 
       if (action === 'delete_user') {
-        const id = String(tgId).trim();
         const key = String(user?.activatedKey || '').trim();
+        // 8-значный ключ возвращается в пул — его можно выдать другому.
         if (/^\d{8}$/.test(key)) {
           await redis.sadd('valid_keys', key);
         }
@@ -752,35 +518,33 @@ async function handleAdminUsers(req: NextApiRequest, res: NextApiResponse) {
         return res.status(200).json({ ok: true });
       }
 
-      if (action === 'toggle_section') {
-        const subjectId = String(subject || '').trim();
-        const sectionId = String(section || '').trim();
-        const enabled   = enable === true || enable === 'true' || enable === '1';
-        const ALLOWED_SECTIONS = ['lessons', 'questions', 'tests', 'tasks', 'exam', 'materials'];
-        if (!subjectId || !ALLOWED_SECTIONS.includes(sectionId)) {
-          return res.status(400).json({ error: 'Bad subject/section' });
-        }
-        const navHidden: Record<string, string[]> = { ...(user.navHidden || {}) };
-        const set = new Set<string>(navHidden[subjectId] || []);
-        if (enabled) set.delete(sectionId); else set.add(sectionId);
-        if (set.size === 0) delete navHidden[subjectId]; else navHidden[subjectId] = [...set];
-        const healed = applyAdminAccessHeals({ ...user, navHidden });
-        await saveUser(String(tgId), healed);
-        return res.status(200).json({
-          ok: true,
-          navHidden: healed.navHidden ?? navHidden,
-          previewStatus: healed.previewStatus ?? null,
-          previewConfirmedAt: healed.previewConfirmedAt ?? null,
-          previewChosenSubject: healed.previewChosenSubject ?? null,
-        });
-      }
+      if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
 
-      return res.status(400).json({ error: 'Unknown action' });
+      const result = await applyUserAction(user, String(action), req.body ?? {});
+      if ('error' in result) return res.status(400).json({ error: result.error });
+
+      if (result.user !== user) await saveUser(id, result.user);
+      if (action === 'unblock') {
+        const today = new Date().toISOString().slice(0, 10);
+        await redis.del(`opens:${id}:${today}`, `opens_notified:${id}:${today}`);
+      }
+      return res.status(200).json({ ok: true, user: await loadDetail(id, result.user) });
     }
 
     // ── Список пользователей (пагинация + фильтры на сервере) ───────────────
     const ids = await getAllUserIds(redis);
     const allUsers = await buildUserList(ids);
+
+    const counts = {
+      total:           allUsers.length,
+      blockedCount:    allUsers.filter(u => u.blocked).length,
+      suspiciousCount: allUsers.filter(u => u.suspicious && !u.blocked).length,
+      demoCount:       allUsers.filter(u => u.usedDemo || u.previewStatus).length,
+      unpaidCount:     allUsers.filter(isUnpaid).length,
+      // ortho открыт всем по умолчанию — считаем тех, у кого есть что-то сверх него.
+      accessCount:     allUsers.filter(u => u.subjects.some(s => s !== 'ortho')).length,
+    };
+    if (req.body?.countsOnly === true) return res.status(200).json(counts);
 
     const listFilter = (['all', 'blocked', 'suspicious', 'demo', 'unpaid'].includes(filter)
       ? filter
@@ -804,31 +568,20 @@ async function handleAdminUsers(req: NextApiRequest, res: NextApiResponse) {
     filtered = sortUsers(filtered, listSort, listSortDir);
 
     const pageSize = PAGE_SIZE;
-    const browsingTop50 = listFilter === 'all' && !query;
-    const pageNum  = browsingTop50 ? 1 : Math.max(1, Number(page) || 1);
+    const pageNum  = Math.max(1, Math.floor(Number(page)) || 1);
     const start    = (pageNum - 1) * pageSize;
     const slice    = filtered.slice(start, start + pageSize);
 
-    const blockedCount    = allUsers.filter(u => u.blocked).length;
-    const suspiciousCount = allUsers.filter(u => u.suspicious && !u.blocked).length;
-    const demoCount       = allUsers.filter(u => u.usedDemo || u.previewStatus).length;
-    const unpaidCount     = allUsers.filter(isUnpaid).length;
-    const microCount      = allUsers.filter(u => u.subjects.some(s => s !== 'ortho')).length;
 
     return res.status(200).json({
+      ...counts,
       users: slice,
-      total: allUsers.length,
       filteredTotal: filtered.length,
       page: pageNum,
       pageSize,
-      hasMore: browsingTop50 ? false : start + pageSize < filtered.length,
+      hasMore: start + pageSize < filtered.length,
       sortBy: listSort,
       sortDir: listSortDir,
-      demoCount,
-      unpaidCount,
-      blockedCount,
-      suspiciousCount,
-      microCount,
       availableSubjects: subjectPayload(),
     });
 

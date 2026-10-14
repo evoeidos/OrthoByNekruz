@@ -1689,7 +1689,15 @@ export function confirmPreviewUser(user: any) {
  * Админ: открыть доступ сразу — без пробника и экрана оплаты.
  * Сохраняет группу, факультет и выбранные студентом предмет/разделы.
  */
-export function adminGrantDirectAccess(user: any): any | null {
+/** Что выдать: предмет и его разделы. */
+export type DirectGrantItem = { id: string; modules: PreviewModule[] };
+
+/**
+ * Открыть доступ без пробника и оплаты через витрину.
+ * plan — явный выбор админа; без него берём заявку студента и уже открытые предметы.
+ * null — выдавать нечего (студент ничего не выбрал, а plan пуст).
+ */
+export function adminGrantDirectAccess(user: any, plan?: DirectGrantItem[]): any | null {
   if (!user) return null;
 
   const studyGroup = user.studyGroup ?? null;
@@ -1714,10 +1722,17 @@ export function adminGrantDirectAccess(user: any): any | null {
     seen.add(id);
   };
 
-  if (primarySubject) {
-    addSubject(primarySubject, getPreviewChosenModulesForAdmin(user));
+  if (plan && plan.length > 0) {
+    for (const item of plan) {
+      const mods = normalizePreviewModules(item.modules);
+      if (mods.length > 0) addSubject(item.id, mods);
+    }
+  } else {
+    if (primarySubject) {
+      addSubject(primarySubject, getPreviewChosenModulesForAdmin(user));
+    }
+    for (const sid of openSubjects) addSubject(sid);
   }
-  for (const sid of openSubjects) addSubject(sid);
 
   if (grantPlan.length === 0) return null;
 

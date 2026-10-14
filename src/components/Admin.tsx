@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Script from 'next/script';
 import { PREVIEW_MODULE_LABELS, type PreviewModule } from '@/lib/previewModules';
 import { formatAdminModuleLabel } from '@/lib/previewModuleStatus';
 import { formatPriceRub } from '@/lib/previewPricing';
 import { getTgChatHref, formatTgChatLabel, openTgChat, normalizeTelegramUsername, isValidTelegramUsername } from '@/lib/tgLinks';
-import { AdminPatternLock, ADMIN_PATTERN, ADMIN_UNLOCK_SECRET } from '@/components/AdminPatternLock';
+import { AdminPatternLock } from '@/components/AdminPatternLock';
+import { adminPost, getTelegramInitData } from '@/lib/adminClient';
 import AdminGroupAccessTab from '@/components/AdminGroupAccessTab';
 import AdminCurriculumTab from '@/components/AdminCurriculumTab';
 
@@ -67,7 +68,8 @@ interface RateBlock {
 
 type Filter = 'all' | 'blocked' | 'suspicious' | 'demo' | 'unpaid';
 type SortBy = 'registered' | 'lastActivity' | 'loginCount';
-type Action = 'block' | 'unblock' | 'reset_demo' | 'grant_direct_access' | 'force_payment_only' | 'confirm_preview' | 'confirm_preview_module' | 'reject_preview_module' | 'reopen_preview_vitrine' | 'toggle_subject' | 'toggle_section' | 'delete_user' | 'toggle_paid' | 'set_contact_username' | 'set_study_group';
+type Action = 'block' | 'unblock' | 'reset_demo' | 'grant_direct_access' | 'force_payment_only' | 'confirm_preview_module' | 'reject_preview_module' | 'reopen_preview_vitrine' | 'toggle_subject' | 'toggle_section' | 'delete_user' | 'toggle_paid' | 'set_contact_username' | 'set_study_group';
+type OnAction = (tgId: string, action: Action, extra?: Record<string, unknown>) => void;
 
 type PreviewModKind = 'questions' | 'tests' | 'tasks';
 type PreviewCatalogSettings = Record<string, {
@@ -119,13 +121,6 @@ const T = {
 
 const FONT_SANS = '"IBM Plex Sans", -apple-system, "SF Pro Display", system-ui, sans-serif';
 const FONT_MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
-
-// ── Читает initData из Telegram WebApp ────────────────────────────────────────
-function getTelegramInitData(): string {
-  if (typeof window === 'undefined') return '';
-  // @ts-ignore
-  return window.Telegram?.WebApp?.initData ?? '';
-}
 
 // ── Подключаем Google Fonts (IBM Plex) ────────────────────────────────────────
 function useFonts() {
@@ -283,11 +278,12 @@ function ActionBtn({
 
 // ── Карточка пользователя ─────────────────────────────────────────────────────
 function UserCard({
-  user, actioning, onAction, expanded, onToggle, availableSubjects, onCopy,
+  user, actioning, onAction, expanded, onToggle, availableSubjects, catalog, onCopy,
 }: {
   user: User;
   actioning: string | null;
-  onAction: (tgId: string, action: Action, subjectId?: string, enabled?: boolean, reason?: string, section?: string) => void;
+  onAction: OnAction;
+  catalog: PreviewCatalogBaseEntry[];
   expanded: boolean;
   onToggle: () => void;
   availableSubjects: SubjectInfo[];
@@ -311,6 +307,15 @@ function UserCard({
         m === 'questions' ? 'Вопросы' : m === 'tests' ? 'Тесты' : m === 'tasks' ? 'Задачи' : m,
       ).join(', ')
     : null;
+  const pendingModules: PreviewModule[] = user.previewPendingModules?.length
+    ? user.previewPendingModules
+    : (adminModules || []);
+  // Студент в процессе пробника/заявки — «Открыть доступ» снимает его целиком.
+  const inPreviewFlow = !!(user.previewStatus || user.receiptClaimedAt
+    || (user.previewChosenSubject && !user.previewConfirmedAt));
+  // «Только оплата» имеет смысл, если есть предмет: выбранный или уже открытый.
+  const canForcePayment = !!user.previewChosenSubject
+    || user.subjects.some(id => id !== 'ortho');
   const previewRequestLabel = previewSubjectLabel
     ? (previewModulesLabel ? `${previewSubjectLabel} — ${previewModulesLabel}` : previewSubjectLabel)
     : null;
@@ -342,6 +347,7 @@ function UserCard({
   const [blockOpen, setBlockOpen] = useState(false);
   const [blockReason, setBlockReason] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [grantOpen, setGrantOpen] = useState(false);
   const [contactDraft, setContactDraft] = useState(user.contactUsername || '');
   const [contactError, setContactError] = useState('');
   const [groupDraft, setGroupDraft] = useState('');
@@ -381,7 +387,7 @@ function UserCard({
     const raw = contactDraft.trim();
     if (!raw) {
       setContactError('');
-      onAction(user.tgId, 'set_contact_username', undefined, undefined, '');
+      onAction(user.tgId, 'set_contact_username', { contactUsername: '' });
       return;
     }
     const handle = normalizeTelegramUsername(raw);
@@ -390,7 +396,7 @@ function UserCard({
       return;
     }
     setContactError('');
-    onAction(user.tgId, 'set_contact_username', undefined, undefined, handle);
+    onAction(user.tgId, 'set_contact_username', { contactUsername: handle });
   };
 
   const saveStudyGroup = () => {
@@ -400,7 +406,7 @@ function UserCard({
       return;
     }
     setGroupError('');
-    onAction(user.tgId, 'set_study_group', undefined, undefined, digits);
+    onAction(user.tgId, 'set_study_group', { studyGroup: digits });
     setGroupDraft('');
   };
 
@@ -659,7 +665,7 @@ function UserCard({
                 return (
                   <button
                     key={s.id}
-                    onClick={() => onAction(user.tgId, 'toggle_subject', s.id, !enabled)}
+                    onClick={() => onAction(user.tgId, 'toggle_subject', { subject: s.id, enable: !enabled })}
                     disabled={busy}
                     style={{
                       padding: '7px 12px', borderRadius: 10,
@@ -714,7 +720,7 @@ function UserCard({
                             return (
                               <button
                                 key={sec.id}
-                                onClick={() => onAction(user.tgId, 'toggle_section', subj.id, !enabled, undefined, sec.id)}
+                                onClick={() => onAction(user.tgId, 'toggle_section', { subject: subj.id, section: sec.id, enable: !enabled })}
                                 disabled={busy}
                                 style={{
                                   padding: '5px 10px', borderRadius: 8,
@@ -833,59 +839,69 @@ function UserCard({
             </div>
           )}
 
-          {/* действия */}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {user.blocked ? (
-              <ActionBtn variant="success" disabled={busy} fullWidth
-                onClick={() => onAction(user.tgId, 'unblock')}>
-                {busy ? '...' : 'Разблокировать'}
-              </ActionBtn>
-            ) : (
-              <ActionBtn variant="danger" disabled={busy} fullWidth
-                onClick={() => { setBlockReason(''); setBlockOpen(true); }}>
-                {busy ? '...' : 'Заблокировать'}
-              </ActionBtn>
-            )}
-            {(user.previewStatus || user.receiptClaimedAt
-              || (user.previewChosenSubject && !user.previewConfirmedAt)) && (
-              <ActionBtn variant="success" disabled={busy} fullWidth
-                onClick={() => onAction(user.tgId, 'grant_direct_access')}>
-                {busy ? '...' : '✓ Открыть доступ (без пробника)'}
-              </ActionBtn>
-            )}
-            {user.previewNeedsConfirm && user.previewChosenSubject && (
-              (user.previewPendingModules && user.previewPendingModules.length > 0
-                ? user.previewPendingModules
-                : (adminModules || [])
-              ).map(mod => (
-                <React.Fragment key={mod}>
+          {/* действия: сначала заявка студента, потом доступ, потом служебное */}
+          {user.previewNeedsConfirm && user.previewChosenSubject && (
+            <div style={{
+              background: T.purpleSoft, border: `1px solid ${T.purple}33`,
+              borderRadius: 10, padding: '10px 12px',
+              display: 'flex', flexDirection: 'column', gap: 8,
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: T.purple, letterSpacing: 0.3 }}>
+                ЗАЯВКА НА ОПЛАТУ{user.receiptClaimedAt ? ' · ЧЕК ОТПРАВЛЕН' : ''}
+              </div>
+              {pendingModules.map(mod => (
+                <div key={mod} style={{ display: 'flex', gap: 8 }}>
                   <ActionBtn variant="success" disabled={busy} fullWidth
-                    onClick={() => onAction(user.tgId, 'confirm_preview_module', undefined, undefined, undefined, mod)}>
+                    onClick={() => onAction(user.tgId, 'confirm_preview_module', { module: mod })}>
                     {busy ? '...' : `✓ ${formatAdminModuleLabel(user.previewChosenSubject!, mod)}`}
                   </ActionBtn>
-                  <ActionBtn variant="danger" disabled={busy} fullWidth
-                    onClick={() => onAction(user.tgId, 'reject_preview_module', undefined, undefined, undefined, mod)}>
-                    {busy ? '...' : `✕ ${formatAdminModuleLabel(user.previewChosenSubject!, mod)}`}
+                  <ActionBtn variant="danger" disabled={busy}
+                    onClick={() => onAction(user.tgId, 'reject_preview_module', { module: mod })}>
+                    ✕ Отказ
                   </ActionBtn>
-                </React.Fragment>
-              ))
-            )}
-            {user.receiptClaimedAt && user.previewNeedsConfirm && (
-              <ActionBtn variant="warn" disabled={busy} fullWidth
-                onClick={() => onAction(user.tgId, 'reopen_preview_vitrine')}>
-                {busy ? '...' : '↩ Вернуть на витрину (оплаты нет)'}
-              </ActionBtn>
-            )}
-            {user.usedDemo && (
-              <ActionBtn variant="warn" disabled={busy} fullWidth
-                onClick={() => onAction(user.tgId, 'reset_demo')}>
-                {busy ? '...' : 'Сбросить пробный доступ'}
-              </ActionBtn>
-            )}
-            <ActionBtn variant="warn" disabled={busy} fullWidth
-              onClick={() => onAction(user.tgId, 'force_payment_only')}>
-              {busy ? '...' : '💳 Только оплата'}
+                </div>
+              ))}
+              {user.receiptClaimedAt && (
+                <ActionBtn variant="warn" disabled={busy} fullWidth
+                  onClick={() => {
+                    if (window.confirm('Оплаты нет? Заявка снимется, студент вернётся к выбору предмета.')) {
+                      onAction(user.tgId, 'reopen_preview_vitrine');
+                    }
+                  }}>
+                  ↩ Оплаты нет — вернуть на витрину
+                </ActionBtn>
+              )}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <ActionBtn variant="success" disabled={busy} fullWidth
+              onClick={() => setGrantOpen(true)}>
+              {inPreviewFlow ? '✓ Открыть доступ без пробника' : '✓ Выдать доступ'}
             </ActionBtn>
+            {canForcePayment && (
+              <ActionBtn variant="warn" disabled={busy} fullWidth
+                onClick={() => {
+                  if (window.confirm('Закрыть доступ и оставить студенту только экран оплаты?')) {
+                    onAction(user.tgId, 'force_payment_only');
+                  }
+                }}>
+                💳 Только оплата
+              </ActionBtn>
+            )}
+            {(user.usedDemo || user.previewStatus) && (
+              <ActionBtn variant="warn" disabled={busy} fullWidth
+                onClick={() => {
+                  if (window.confirm('Сбросить пробник? Студент снова сможет взять пробный доступ.')) {
+                    onAction(user.tgId, 'reset_demo');
+                  }
+                }}>
+                Сбросить пробный доступ
+              </ActionBtn>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button
               type="button"
               style={{
@@ -903,6 +919,17 @@ function UserCard({
             >
               ✉ {tgChatLabel}
             </button>
+            {user.blocked ? (
+              <ActionBtn variant="success" disabled={busy} fullWidth
+                onClick={() => onAction(user.tgId, 'unblock')}>
+                {busy ? '...' : 'Разблокировать'}
+              </ActionBtn>
+            ) : (
+              <ActionBtn variant="danger" disabled={busy} fullWidth
+                onClick={() => { setBlockReason(''); setBlockOpen(true); }}>
+                Заблокировать
+              </ActionBtn>
+            )}
           </div>
 
           {/* удаление навсегда */}
@@ -923,6 +950,20 @@ function UserCard({
             🗑 Удалить пользователя навсегда
           </button>
         </div>
+      )}
+
+      {grantOpen && (
+        <GrantAccessModal
+          user={user}
+          subjects={availableSubjects}
+          catalog={catalog}
+          busy={busy}
+          onCancel={() => setGrantOpen(false)}
+          onSubmit={grants => {
+            setGrantOpen(false);
+            onAction(user.tgId, 'grant_direct_access', { grants });
+          }}
+        />
       )}
 
       {/* ─── Модалка причины блокировки ─── */}
@@ -986,7 +1027,7 @@ function UserCard({
                 disabled={busy}
                 onClick={() => {
                   setBlockOpen(false);
-                  onAction(user.tgId, 'block', undefined, undefined, blockReason.trim() || undefined);
+                  onAction(user.tgId, 'block', { reason: blockReason.trim() });
                 }}
               >
                 Заблокировать
@@ -1047,6 +1088,163 @@ function UserCard({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Модалка «Открыть доступ»: предметы и разделы ─────────────────────────────
+const GRANT_MODULES: PreviewModKind[] = ['questions', 'tests', 'tasks'];
+
+function GrantAccessModal({
+  user, subjects, catalog, busy, onCancel, onSubmit,
+}: {
+  user: User;
+  subjects: SubjectInfo[];
+  catalog: PreviewCatalogBaseEntry[];
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (grants: { subject: string; modules: PreviewModKind[] }[]) => void;
+}) {
+  // Разделы, по которым у предмета есть контент. Каталог не загрузился — все.
+  const availableModules = (subjectId: string): PreviewModKind[] => {
+    const entry = catalog.find(c => c.id === subjectId);
+    if (!entry) return GRANT_MODULES;
+    return entry.modules.filter(m => m.available).map(m => m.id);
+  };
+
+  // По умолчанию — заявка студента (предмет и выбранные им разделы).
+  const [picked, setPicked] = useState<Record<string, PreviewModKind[]>>(() => {
+    const chosen = user.previewChosenSubject;
+    if (!chosen) return {};
+    const requested = (user.previewDisplayModules?.length
+      ? user.previewDisplayModules
+      : user.previewChosenModules ?? []) as PreviewModKind[];
+    const available = availableModules(chosen);
+    const mods = requested.filter(m => available.includes(m));
+    return { [chosen]: mods.length ? mods : available };
+  });
+
+  const toggleSubject = (id: string) => setPicked(prev => {
+    const next = { ...prev };
+    if (next[id]) delete next[id];
+    else next[id] = availableModules(id);
+    return next;
+  });
+
+  const toggleModule = (id: string, mod: PreviewModKind) => setPicked(prev => {
+    const cur = prev[id] ?? [];
+    const mods = cur.includes(mod) ? cur.filter(m => m !== mod) : [...cur, mod];
+    return { ...prev, [id]: mods };
+  });
+
+  const grants = Object.entries(picked)
+    .filter(([, mods]) => mods.length > 0)
+    .map(([subject, modules]) => ({ subject, modules }));
+
+  return (
+    <div
+      onClick={e => { e.stopPropagation(); onCancel(); }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(31,27,20,0.45)',
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        backdropFilter: 'blur(4px)',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: T.surface, borderRadius: '18px 18px 0 0',
+          border: `1px solid ${T.border}`,
+          padding: '18px 16px 24px', width: '100%', maxWidth: 520,
+          maxHeight: '85vh', overflowY: 'auto', boxSizing: 'border-box',
+          fontFamily: FONT_SANS,
+        }}
+      >
+        <div style={{ fontSize: 16, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+          Открыть доступ
+        </div>
+        <div style={{ fontSize: 12.5, color: T.textMuted, marginBottom: 14, lineHeight: 1.45 }}>
+          {displayName(user)} · без пробника и витрины. Отметь предметы и разделы —
+          студент сразу получит их как оплаченные. Группа и факультет сохранятся.
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {subjects.map(s => {
+            const mods = picked[s.id];
+            const on = !!mods;
+            const available = availableModules(s.id);
+            const owned = user.subjects.includes(s.id);
+            return (
+              <div key={s.id} style={{
+                border: `1px solid ${on ? T.success + '55' : T.border}`,
+                background: on ? T.successSoft : T.surface,
+                borderRadius: 10, padding: '9px 11px',
+              }}>
+                <button
+                  type="button"
+                  onClick={() => toggleSubject(s.id)}
+                  disabled={available.length === 0}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                    border: 'none', background: 'transparent', padding: 0,
+                    cursor: available.length ? 'pointer' : 'default',
+                    fontFamily: FONT_SANS, fontSize: 13.5, fontWeight: 600,
+                    color: available.length ? T.text : T.textFaint, textAlign: 'left',
+                  }}
+                >
+                  <span style={{
+                    width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                    background: on ? T.success : T.chipBg,
+                    color: '#fff', fontSize: 11, fontWeight: 700,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>{on ? '✓' : ''}</span>
+                  <span style={{ flex: 1 }}>{s.label}</span>
+                  {owned && <Chip bg={T.accentSoft} color={T.accent}>уже есть</Chip>}
+                  {available.length === 0 && <Chip bg={T.chipBg} color={T.textFaint}>нет контента</Chip>}
+                </button>
+                {on && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, paddingLeft: 24 }}>
+                    {available.map(mod => {
+                      const active = mods.includes(mod);
+                      return (
+                        <button
+                          key={mod}
+                          type="button"
+                          onClick={() => toggleModule(s.id, mod)}
+                          style={{
+                            padding: '5px 10px', borderRadius: 8,
+                            fontSize: 12, fontWeight: 600, fontFamily: FONT_SANS,
+                            border: `1px solid ${active ? T.accent + '55' : T.border}`,
+                            background: active ? T.accentSoft : T.surfaceAlt,
+                            color: active ? T.accent : T.textFaint,
+                            textDecoration: active ? 'none' : 'line-through',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {PREVIEW_MODULE_LABELS[mod]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <ActionBtn variant="neutral" fullWidth onClick={onCancel}>Отмена</ActionBtn>
+          <ActionBtn
+            variant="primary"
+            fullWidth
+            disabled={busy || grants.length === 0}
+            onClick={() => onSubmit(grants)}
+          >
+            {grants.length ? `Открыть (${grants.length})` : 'Выбери предмет'}
+          </ActionBtn>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1144,7 +1342,7 @@ export default function AdminPage() {
   const [blockedCount,       setBlockedCount]       = useState(0);
   const [unpaidCount,        setUnpaidCount]        = useState(0);
   const [suspiciousCount,    setSuspiciousCount]    = useState(0);
-  const [microCount,         setMicroCount]         = useState(0);
+  const [accessCount,        setAccessCount]        = useState(0);
   const [filteredTotal,      setFilteredTotal]      = useState(0);
   const [actioning,          setActioning]          = useState<string | null>(null);
   const [toast,              setToast]              = useState<string | null>(null);
@@ -1240,47 +1438,49 @@ export default function AdminPage() {
   >({});
   const [previewCatalogSaving, setPreviewCatalogSaving] = useState<string | null>(null);
 
+  // Ключ держим только в памяти: перезапуск админки — снова графический ключ.
+  const secretRef = useRef('');
+  useEffect(() => {
+    try { sessionStorage.removeItem('admin_secret'); } catch { /* старый формат хранения */ }
+  }, []);
+
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = useCallback((msg: string) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(msg);
+    toastTimer.current = setTimeout(() => setToast(null), msg.length > 40 ? 4000 : 2500);
+  }, []);
+
+  /** Все запросы админки: ключ + подпись Telegram, ошибка — текстом сервера. */
+  const api = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (url: string, body: Record<string, unknown> = {}) => adminPost<Record<string, any>>(url, secretRef.current, body),
+    [],
+  );
+
+  const mergeUser = useCallback((patch: Partial<User> & { tgId: string }) => {
+    setUsers(prev => prev.map(u => (u.tgId === patch.tgId ? { ...u, ...patch } : u)));
+  }, []);
+
   useEffect(() => {
     fetch('/api/admin-config')
       .then(res => res.json())
       .then(data => {
         if (typeof data.isPaidKeysEnabled === 'boolean') setIsPaidKeysEnabled(data.isPaidKeysEnabled);
-        if (Array.isArray(data.previewCatalogBase)) setPreviewCatalogBase(data.previewCatalogBase);
-        if (data.previewCatalog && typeof data.previewCatalog === 'object') {
-          setPreviewCatalog(data.previewCatalog as PreviewCatalogSettings);
-        }
-        if (data.previewCatalogEffective && typeof data.previewCatalogEffective === 'object') {
-          setPreviewCatalogEffective(data.previewCatalogEffective);
-        }
+        applyPreviewCatalogResponse(data);
       })
       .catch(err => console.error('Ошибка загрузки конфига:', err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const togglePaidKeys = async () => {
-    const initData = getTelegramInitData();
-    if (!initData) { showToast('Нет доступа: не в Telegram'); return; }
-
     setIsPaidKeysLoading(true);
-    try {
-      const newValue = !isPaidKeysEnabled;
-      const res = await fetch('/api/admin-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body: JSON.stringify({ isPaidKeysEnabled: newValue, initData, secret }),
-      });
-      if (res.ok) {
-        setIsPaidKeysEnabled(newValue);
-        showToast(newValue ? '✓ 8-значные ключи включены' : '8-значные ключи отключены');
-      } else if (res.status === 403) {
-        showToast('Нет прав');
-      } else {
-        showToast('Ошибка при переключении');
-      }
-    } catch {
-      showToast('Ошибка сети');
-    } finally {
-      setIsPaidKeysLoading(false);
-    }
+    const next = !isPaidKeysEnabled;
+    const r = await api('/api/admin-config', { isPaidKeysEnabled: next });
+    setIsPaidKeysLoading(false);
+    if (!r.ok) { showToast(r.error); return; }
+    setIsPaidKeysEnabled(next);
+    showToast(next ? '✓ 8-значные ключи включены' : '8-значные ключи отключены');
   };
 
   const applyPreviewCatalogResponse = (data: Record<string, unknown>) => {
@@ -1294,30 +1494,12 @@ export default function AdminPage() {
   };
 
   const savePreviewCatalog = async (next: PreviewCatalogSettings, savingKey: string) => {
-    const initData = getTelegramInitData();
-    if (!initData) { showToast('Нет доступа: не в Telegram'); return; }
-
     setPreviewCatalogSaving(savingKey);
-    try {
-      const res = await fetch('/api/admin-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body: JSON.stringify({ previewCatalog: next, initData, secret }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        applyPreviewCatalogResponse(data);
-        showToast('✓ Витрина обновлена');
-      } else if (res.status === 403) {
-        showToast('Нет прав');
-      } else {
-        showToast('Ошибка сохранения');
-      }
-    } catch {
-      showToast('Ошибка сети');
-    } finally {
-      setPreviewCatalogSaving(null);
-    }
+    const r = await api('/api/admin-config', { previewCatalog: next });
+    setPreviewCatalogSaving(null);
+    if (!r.ok) { showToast(r.error); return; }
+    applyPreviewCatalogResponse(r.data);
+    showToast('✓ Витрина обновлена');
   };
 
   const buildSubjectCatalogPatch = (
@@ -1368,8 +1550,7 @@ export default function AdminPage() {
     }
 
     const patch = buildSubjectCatalogPatch(subjectId, newOpen, modules);
-    const next = mergePreviewCatalog(previewCatalog, subjectId, patch);
-    savePreviewCatalog(next, `subject:${subjectId}`);
+    savePreviewCatalog(mergePreviewCatalog(previewCatalog, subjectId, patch), `subject:${subjectId}`);
   };
 
   const togglePreviewModule = (subjectId: string, modId: PreviewModKind) => {
@@ -1381,220 +1562,114 @@ export default function AdminPage() {
     const modules = { ...effective.modules };
     modules[modId] = !effective.modules[modId];
 
-    const open = baseEntry.modules.some(
-      m => m.available && modules[m.id],
-    );
+    const open = baseEntry.modules.some(m => m.available && modules[m.id]);
     const patch = buildSubjectCatalogPatch(subjectId, open, modules);
-    const next = mergePreviewCatalog(previewCatalog, subjectId, patch);
-    savePreviewCatalog(next, `module:${subjectId}:${modId}`);
+    savePreviewCatalog(mergePreviewCatalog(previewCatalog, subjectId, patch), `module:${subjectId}:${modId}`);
   };
 
-  const resetPreviewByTgId = async () => {
-    const initData = getTelegramInitData();
-    if (!initData) { showToast('Нет доступа: не в Telegram'); return; }
+  /** Счётчики фильтров — после действия над студентом они могли поменяться. */
+  const refreshCounts = useCallback(async () => {
+    const r = await api('/api/admin-users', { countsOnly: true });
+    if (!r.ok) return;
+    setTotal(r.data.total ?? 0);
+    setDemoCount(r.data.demoCount ?? 0);
+    setBlockedCount(r.data.blockedCount ?? 0);
+    setUnpaidCount(r.data.unpaidCount ?? 0);
+    setSuspiciousCount(r.data.suspiciousCount ?? 0);
+    setAccessCount(r.data.accessCount ?? 0);
+  }, [api]);
 
+  const resetPreviewByTgId = async () => {
     const id = demoResetTgId.replace(/\D/g, '').trim();
-    if (!id || id.length < 5) {
+    if (id.length < 5) {
       showToast('Введи корректный Telegram ID');
       return;
     }
     setDemoResetLoading(true);
-    try {
-      const r = await fetch('/api/admin-users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body: JSON.stringify({ action: 'reset_demo', tgId: id, secret, initData }),
-      });
-      if (r.ok) {
-        setDemoResetTgId('');
-        showToast('✓ Сброшено: пробный доступ и блокировки входа');
-      } else if (r.status === 403) {
-        showToast('Нет прав — открой админку через Telegram');
-      } else {
-        showToast('Ошибка сброса');
-      }
-    } catch {
-      showToast('Ошибка сети');
-    } finally {
-      setDemoResetLoading(false);
-    }
+    const r = await api('/api/admin-users', { action: 'reset_demo', tgId: id });
+    setDemoResetLoading(false);
+    if (!r.ok) { showToast(r.error); return; }
+    if (r.data.user) mergeUser(r.data.user as User);
+    setDemoResetTgId('');
+    showToast(r.data.user
+      ? '✓ Сброшено: пробный доступ и блокировки входа'
+      : '✓ Блокировки входа сняты (аккаунта в базе нет)');
+    void refreshCounts();
   };
 
   const giftBioTasksToAll = async () => {
-    const initData = getTelegramInitData();
-    if (!initData) { showToast('Нет доступа: не в Telegram'); return; }
     if (!window.confirm(
       'Открыть «Задачи» по биологии всем, у кого уже есть тест?\n\n'
       + 'У кого задачи уже открыты — не затронуты.',
     )) return;
 
     setGiftBioTasksLoading(true);
-    try {
-      const r = await fetch('/api/admin-users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body: JSON.stringify({ action: 'gift_bio_tasks', secret, initData }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (r.ok) {
-        showToast(`🎁 Задачи bio: обновлено ${data.updated ?? 0} из ${data.total ?? '?'}`);
-      } else if (r.status === 403) {
-        showToast('Нет прав — открой админку через Telegram');
-      } else {
-        showToast((data as { error?: string }).error || 'Ошибка раздачи');
-      }
-    } catch {
-      showToast('Ошибка сети');
-    } finally {
-      setGiftBioTasksLoading(false);
-    }
+    const r = await api('/api/admin-users', { action: 'gift_bio_tasks' });
+    setGiftBioTasksLoading(false);
+    if (!r.ok) { showToast(r.error); return; }
+    showToast(`🎁 Задачи bio: обновлено ${r.data.updated ?? 0} из ${r.data.total ?? '?'}`);
   };
 
   const fetchFacultyStats = useCallback(async (force = false) => {
-    const initData = getTelegramInitData();
-    if (!initData) { showToast('Нет доступа: не в Telegram'); return; }
     setFacultyStatsLoading(true);
-    try {
-      const r = await fetch('/api/admin-faculty-stats', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body:    JSON.stringify({ secret, initData, force }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (r.ok && data.stats) {
-        setFacultyStats(data.stats);
-      } else if (r.status === 403) {
-        showToast('Нет прав — открой админку через Telegram');
-      } else {
-        showToast((data as { error?: string }).error || 'Ошибка загрузки статистики');
-      }
-    } catch {
-      showToast('Ошибка сети');
-    } finally {
-      setFacultyStatsLoading(false);
-    }
-  }, [secret]);
+    const r = await api('/api/admin-faculty-stats', { force });
+    setFacultyStatsLoading(false);
+    if (r.ok && r.data.stats) setFacultyStats(r.data.stats);
+    else showToast(r.ok ? 'Ошибка загрузки статистики' : r.error);
+  }, [api, showToast]);
 
   const fetchRateBlocks = useCallback(async () => {
     setRateBlocksLoading(true);
-    try {
-      const r = await fetch('/api/admin-rate-blocks', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body:    JSON.stringify({ action: 'list', secret }),
-      });
-      if (r.ok) {
-        const data = await r.json();
-        setRateBlocks(data.blocks ?? []);
-      }
-    } catch {
-      showToast('Ошибка загрузки блокировок');
-    } finally {
-      setRateBlocksLoading(false);
-    }
-  }, [secret]);
+    const r = await api('/api/admin-rate-blocks', { action: 'list' });
+    setRateBlocksLoading(false);
+    if (r.ok) setRateBlocks(r.data.blocks ?? []);
+    else showToast(r.error);
+  }, [api, showToast]);
 
   const clearRateBlock = async (tgId: string) => {
     setClearingTgId(tgId);
-    try {
-      const r = await fetch('/api/admin-rate-blocks', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body:    JSON.stringify({ action: 'clear', tgId, secret }),
-      });
-      if (r.ok) {
-        setRateBlocks(prev => prev.filter(b => b.tgId !== tgId));
-        showToast('✓ Блокировка снята');
-      } else {
-        showToast('Ошибка снятия блокировки');
-      }
-    } catch {
-      showToast('Ошибка сети');
-    } finally {
-      setClearingTgId(null);
-    }
+    const r = await api('/api/admin-rate-blocks', { action: 'clear', tgId });
+    setClearingTgId(null);
+    if (!r.ok) { showToast(r.error); return; }
+    setRateBlocks(prev => prev.filter(b => b.tgId !== tgId));
+    showToast('✓ Блокировка снята');
   };
 
   const fetchWhitelist = useCallback(async () => {
     setWlLoading(true);
-    try {
-      const r = await fetch('/api/admin-whitelist', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body:    JSON.stringify({ action: 'list', secret }),
-      });
-      if (r.ok) {
-        const data = await r.json();
-        setWlItems(data.ids ?? []);
-      }
-    } catch {
-      showToast('Ошибка загрузки белого списка');
-    } finally {
-      setWlLoading(false);
-    }
-  }, [secret]);
+    const r = await api('/api/admin-whitelist', { action: 'list' });
+    setWlLoading(false);
+    if (r.ok) setWlItems(r.data.ids ?? []);
+    else showToast(r.error);
+  }, [api, showToast]);
 
   const fetchValidKeys = useCallback(async () => {
     setKeysLoading(true);
-    try {
-      const r = await fetch('/api/admin-whitelist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body: JSON.stringify({ action: 'list_keys', secret }),
-      });
-      const data = await r.json();
-      if (data.ok) setKeysList((data.keys ?? []).sort());
-      else showToast('Ошибка загрузки ключей');
-    } catch {
-      showToast('Ошибка загрузки ключей');
-    } finally {
-      setKeysLoading(false);
-    }
-  }, [secret]);
+    const r = await api('/api/admin-whitelist', { action: 'list_keys' });
+    setKeysLoading(false);
+    if (r.ok) setKeysList(((r.data.keys ?? []) as string[]).sort());
+    else showToast(r.error);
+  }, [api, showToast]);
 
   const addToWhitelist = async () => {
     const id = wlInput.trim();
     if (!id) return;
     setWlAdding(true);
-    try {
-      const r = await fetch('/api/admin-whitelist', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body:    JSON.stringify({ action: 'add', tgId: id, secret }),
-      });
-      if (r.ok) {
-        setWlItems(prev => prev.includes(id) ? prev : [...prev, id]);
-        setWlInput('');
-        showToast('✓ ID добавлен в белый список');
-      } else {
-        showToast('Ошибка добавления');
-      }
-    } catch {
-      showToast('Ошибка сети');
-    } finally {
-      setWlAdding(false);
-    }
+    const r = await api('/api/admin-whitelist', { action: 'add', tgId: id });
+    setWlAdding(false);
+    if (!r.ok) { showToast(r.error); return; }
+    setWlItems(prev => prev.includes(id) ? prev : [...prev, id]);
+    setWlInput('');
+    showToast('✓ ID добавлен в белый список');
   };
 
   const removeFromWhitelist = async (id: string) => {
     setWlRemoving(id);
-    try {
-      const r = await fetch('/api/admin-whitelist', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body:    JSON.stringify({ action: 'remove', tgId: id, secret }),
-      });
-      if (r.ok) {
-        setWlItems(prev => prev.filter(x => x !== id));
-        showToast('✓ ID удалён из белого списка');
-      } else {
-        showToast('Ошибка удаления');
-      }
-    } catch {
-      showToast('Ошибка сети');
-    } finally {
-      setWlRemoving(null);
-    }
+    const r = await api('/api/admin-whitelist', { action: 'remove', tgId: id });
+    setWlRemoving(null);
+    if (!r.ok) { showToast(r.error); return; }
+    setWlItems(prev => prev.filter(x => x !== id));
+    showToast('✓ ID удалён из белого списка');
   };
 
   const fetchRtItems = useCallback(async (subjId: string, typeVal: 'questions' | 'tests' | 'tasks') => {
@@ -1602,99 +1677,59 @@ export default function AdminPage() {
     setRtItems([]);
     setRtSelectedId(null);
     setRtTerms([]);
-    try {
-      const r = await fetch('/api/admin-related-terms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body: JSON.stringify({ action: 'load_items', subjectId: subjId, type: typeVal, secret }),
-      });
-      if (r.ok) { const d = await r.json(); setRtItems(d.items ?? []); }
-      else showToast('Ошибка загрузки списка');
-    } catch { showToast('Ошибка сети'); }
-    finally { setRtLoading(false); }
-  }, [secret]);
+    const r = await api('/api/admin-related-terms', { action: 'load_items', subjectId: subjId, type: typeVal });
+    setRtLoading(false);
+    if (r.ok) setRtItems(r.data.items ?? []);
+    else showToast(r.error);
+  }, [api, showToast]);
 
   const saveRtTerms = async (subjId: string, typeVal: string, itemId: string, terms: string[]) => {
     setRtSaving(true);
-    try {
-      const r = await fetch('/api/admin-related-terms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body: JSON.stringify({ action: 'set_terms', subjectId: subjId, type: typeVal, itemId, terms, secret }),
-      });
-      if (r.ok) {
-        setRtItems(prev => prev.map(item =>
-          item.id === itemId ? { ...item, relatedTerms: terms } : item
-        ));
-        showToast('✓ Термины сохранены');
-      } else { showToast('Ошибка сохранения'); }
-    } catch { showToast('Ошибка сети'); }
-    finally { setRtSaving(false); }
+    const r = await api('/api/admin-related-terms', { action: 'set_terms', subjectId: subjId, type: typeVal, itemId, terms });
+    setRtSaving(false);
+    if (!r.ok) { showToast(r.error); return; }
+    const saved = Array.isArray(r.data.terms) ? r.data.terms as string[] : terms;
+    setRtItems(prev => prev.map(item => item.id === itemId ? { ...item, relatedTerms: saved } : item));
+    showToast('✓ Термины сохранены');
   };
 
   const bustCache = async () => {
+    if (!window.confirm('Сбросить кэш контента у всех студентов? Приложение заново скачает вопросы и тесты.')) return;
     setRtBusting(true);
-    try {
-      const r = await fetch('/api/admin-cache-bust', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body: JSON.stringify({ secret }),
-      });
-      if (r.ok) { showToast('✓ Кэш сброшен — все получат свежие данные в течение 5 мин'); }
-      else if (r.status === 401) { showToast('Нет прав'); }
-      else { showToast('Ошибка при сбросе кэша'); }
-    } catch { showToast('Ошибка сети'); }
-    finally { setRtBusting(false); }
+    const r = await api('/api/admin-cache-bust');
+    setRtBusting(false);
+    showToast(r.ok ? '✓ Кэш сброшен — все получат свежие данные в течение 5 мин' : r.error);
   };
 
   const fetchGlEntries = useCallback(async (subjId: string) => {
     setGlLoading(true);
     setGlEntries([]);
-    try {
-      const r = await fetch('/api/admin-glossary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body: JSON.stringify({ action: 'list', subjectId: subjId, secret }),
-      });
-      if (r.ok) { const d = await r.json(); setGlEntries(d.entries ?? []); }
-      else showToast('Ошибка загрузки глоссария');
-    } catch { showToast('Ошибка сети'); }
-    finally { setGlLoading(false); }
-  }, [secret]);
+    const r = await api('/api/admin-glossary', { action: 'list', subjectId: subjId });
+    setGlLoading(false);
+    if (r.ok) setGlEntries(r.data.entries ?? []);
+    else showToast(r.error);
+  }, [api, showToast]);
 
   const addGlEntry = async () => {
     if (!glForm.term.trim() || !glForm.definition.trim()) {
       showToast('Заполни термин и определение'); return;
     }
     setGlAdding(true);
-    try {
-      const r = await fetch('/api/admin-glossary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body: JSON.stringify({ action: 'add', subjectId: glSubject, entry: glForm, secret }),
-      });
-      if (r.ok) {
-        const d = await r.json();
-        setGlEntries(d.entries ?? []);
-        setGlForm({ term: '', definition: '', image: '' });
-        showToast('✓ Термин добавлен');
-      } else { showToast('Ошибка добавления'); }
-    } catch { showToast('Ошибка сети'); }
-    finally { setGlAdding(false); }
+    const r = await api('/api/admin-glossary', { action: 'add', subjectId: glSubject, entry: glForm });
+    setGlAdding(false);
+    if (!r.ok) { showToast(r.error); return; }
+    setGlEntries(r.data.entries ?? []);
+    setGlForm({ term: '', definition: '', image: '' });
+    showToast('✓ Термин добавлен');
   };
 
   const deleteGlEntry = async (entryId: string) => {
     setGlDeleting(entryId);
-    try {
-      const r = await fetch('/api/admin-glossary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body: JSON.stringify({ action: 'delete', subjectId: glSubject, entryId, secret }),
-      });
-      if (r.ok) { const d = await r.json(); setGlEntries(d.entries ?? []); showToast('Удалено'); }
-      else { showToast('Ошибка удаления'); }
-    } catch { showToast('Ошибка сети'); }
-    finally { setGlDeleting(null); }
+    const r = await api('/api/admin-glossary', { action: 'delete', subjectId: glSubject, entryId });
+    setGlDeleting(null);
+    if (!r.ok) { showToast(r.error); return; }
+    setGlEntries(r.data.entries ?? []);
+    showToast('Удалено');
   };
 
   // Копирование в буфер с тостом
@@ -1713,51 +1748,22 @@ export default function AdminPage() {
       catch { showToast('Не удалось скопировать'); }
       document.body.removeChild(ta);
     }
-  }, []);
+  }, [showToast]);
 
-  useEffect(() => {
-    const saved = sessionStorage.getItem('admin_secret');
-    if (saved && authed) setSecret(saved);
-  }, [authed]);
-
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2500);
-  };
-
-  const fetchUserDetail = useCallback(async (s: string, tgId: string) => {
-    const initData = getTelegramInitData();
-    if (!initData) return;
-    try {
-      const r = await fetch('/api/admin-users', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body:    JSON.stringify({ secret: s, initData, action: 'get_user', tgId }),
-      });
-      if (!r.ok) return;
-      const data = await r.json();
-      if (!data.user) return;
-      setUsers(prev => prev.map(u => u.tgId === tgId ? { ...u, ...data.user } : u));
-    } catch { /* не критично */ }
-  }, []);
+  const fetchUserDetail = useCallback(async (tgId: string) => {
+    const r = await api('/api/admin-users', { action: 'get_user', tgId });
+    if (r.ok && r.data.user) mergeUser(r.data.user as User);
+  }, [api, mergeUser]);
 
   const toggleExpand = useCallback((tgId: string) => {
-    setExpandedIds(prev => {
-      const opening = !prev.has(tgId);
-      if (opening) {
-        const u = users.find(x => x.tgId === tgId);
-        if (u && u.navHidden === undefined) {
-          void fetchUserDetail(secret, tgId);
-        }
-        return new Set([tgId]);
-      }
-      return new Set();
-    });
-  }, [users, secret, fetchUserDetail]);
+    const opening = !expandedIdsRef.current.has(tgId);
+    setExpandedIds(opening ? new Set([tgId]) : new Set());
+    if (opening) void fetchUserDetail(tgId);
+  }, [fetchUserDetail]);
 
   // ── POST: список пользователей (пагинация, фильтры на сервере) ───────────
+  // Возвращает true, если сервер принял ключ.
   const fetchUsers = useCallback(async (
-    s: string,
     opts?: {
       page?: number;
       append?: boolean;
@@ -1765,10 +1771,7 @@ export default function AdminPage() {
       sortBy?: SortBy;
       sortDir?: 'asc' | 'desc';
     },
-  ) => {
-    const initData = getTelegramInitData();
-    if (!initData) { setError('Вход только через Telegram Mini App'); return; }
-
+  ): Promise<boolean> => {
     const pageNum    = opts?.page ?? 1;
     const append     = opts?.append === true;
     const bg         = opts?.background === true;
@@ -1781,454 +1784,126 @@ export default function AdminPage() {
     else if (!append) setLoading(true);
     setError('');
 
-    try {
-      const r = await fetch('/api/admin-users', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body:    JSON.stringify({
-          secret: s,
-          initData,
-          page:     pageNum,
-          limit:    50,
-          filter,
-          q:        debouncedSearch,
-          sortBy:   reqSort,
-          sortDir:  reqSortDir,
-        }),
-      });
+    const r = await api('/api/admin-users', {
+      page:    pageNum,
+      filter,
+      q:       debouncedSearch,
+      sortBy:  reqSort,
+      sortDir: reqSortDir,
+    });
+    setLoading(false);
+    setRefreshing(false);
 
-      if (r.status === 403 || r.status === 401) {
-        setError('Нет доступа: неверный пароль или Telegram ID');
-        setAuthed(false);
-        return;
-      }
-      if (!r.ok) { setError('Ошибка сервера'); return; }
-
-      const data = await r.json();
-      setUsers(prev => append ? [...prev, ...(data.users ?? [])] : (data.users ?? []));
-      setPage(data.page ?? pageNum);
-      setHasMore(data.hasMore === true);
-      setTotal(data.total ?? 0);
-      setFilteredTotal(data.filteredTotal ?? data.total ?? 0);
-      setDemoCount(data.demoCount ?? 0);
-      setBlockedCount(data.blockedCount ?? 0);
-      setUnpaidCount(data.unpaidCount ?? 0);
-      setSuspiciousCount(data.suspiciousCount ?? 0);
-      setMicroCount(data.microCount ?? 0);
-      setAvailableSubjects(data.availableSubjects ?? []);
-
-      sessionStorage.setItem('admin_secret', s);
-      setAuthed(true);
-
-      for (const tgId of expandedIdsRef.current) {
-        void fetchUserDetail(s, tgId);
-      }
-
-      if (!bg) {
-        fetch('/api/admin-rate-blocks', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-          body:    JSON.stringify({ action: 'list', secret: s }),
-        })
-          .then(res => res.ok ? res.json() : null)
-          .then(d => { if (d) setRateBlocks(d.blocks ?? []); })
-          .catch(() => {});
-      }
-    } catch {
-      setError('Ошибка соединения');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    if (!r.ok) {
+      setError(r.error);
+      if (r.status === 401 || r.status === 403) setAuthed(false);
+      return false;
     }
-  }, [filter, debouncedSearch, sortBy, registeredAsc, fetchUserDetail]);
+
+    const data = r.data;
+    setUsers(prev => append ? [...prev, ...(data.users ?? [])] : (data.users ?? []));
+    setPage(data.page ?? pageNum);
+    setHasMore(data.hasMore === true);
+    setTotal(data.total ?? 0);
+    setFilteredTotal(data.filteredTotal ?? data.total ?? 0);
+    setDemoCount(data.demoCount ?? 0);
+    setBlockedCount(data.blockedCount ?? 0);
+    setUnpaidCount(data.unpaidCount ?? 0);
+    setSuspiciousCount(data.suspiciousCount ?? 0);
+    setAccessCount(data.accessCount ?? 0);
+    setAvailableSubjects(data.availableSubjects ?? []);
+    setAuthed(true);
+
+    if (!append) {
+      for (const tgId of expandedIdsRef.current) void fetchUserDetail(tgId);
+    }
+    return true;
+  }, [api, filter, debouncedSearch, sortBy, registeredAsc, fetchUserDetail]);
 
   useEffect(() => {
-    if (!authed || !secret) return;
+    if (!authed) return;
     setPage(1);
-    fetchUsers(secret, { page: 1, append: false, background: true });
+    void fetchUsers({ page: 1, append: false, background: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, debouncedSearch]);
 
+  // Блокировки входа показываем в «Настройках» — подгружаем после входа.
+  useEffect(() => {
+    if (authed) void fetchRateBlocks();
+  }, [authed, fetchRateBlocks]);
+
   const handleSortClick = useCallback((id: SortBy) => {
-    if (id === 'registered') {
-      if (sortBy === 'registered') {
-        const nextAsc = !registeredAsc;
-        setRegisteredAsc(nextAsc);
-        setPage(1);
-        fetchUsers(secret, {
-          page: 1,
-          append: false,
-          background: true,
-          sortBy: 'registered',
-          sortDir: nextAsc ? 'asc' : 'desc',
-        });
-      } else {
-        setSortBy('registered');
-        setRegisteredAsc(false);
-        setPage(1);
-        fetchUsers(secret, {
-          page: 1,
-          append: false,
-          background: true,
-          sortBy: 'registered',
-          sortDir: 'desc',
-        });
-      }
-      return;
+    let nextDir: 'asc' | 'desc' = 'desc';
+    if (id === 'registered' && sortBy === 'registered') {
+      nextDir = registeredAsc ? 'desc' : 'asc';
+      setRegisteredAsc(!registeredAsc);
+    } else {
+      setRegisteredAsc(false);
     }
     setSortBy(id);
-    setRegisteredAsc(false);
     setPage(1);
-    fetchUsers(secret, {
-      page: 1,
-      append: false,
-      background: true,
-      sortBy: id,
-      sortDir: 'desc',
-    });
-  }, [sortBy, registeredAsc, secret, fetchUsers]);
+    void fetchUsers({ page: 1, append: false, background: true, sortBy: id, sortDir: nextDir });
+  }, [sortBy, registeredAsc, fetchUsers]);
 
-  const handlePatternUnlock = useCallback(() => {
-    const initData = getTelegramInitData();
-    if (!initData) {
+  const handlePatternSubmit = useCallback(async (pattern: string) => {
+    if (!getTelegramInitData()) {
       setError('Откройте панель через Telegram — вход из браузера заблокирован');
-      return;
+      return false;
     }
-    setError('');
-    setSecret(ADMIN_UNLOCK_SECRET);
-    fetchUsers(ADMIN_UNLOCK_SECRET);
+    secretRef.current = pattern;
+    const ok = await fetchUsers({ page: 1 });
+    if (ok) setSecret(pattern);
+    else secretRef.current = '';
+    return ok;
   }, [fetchUsers]);
 
   // ── POST: действие над пользователем ──────────────────────────────────────
-  const doAction = async (
-    tgId: string,
-    action: Action,
-    subjectId?: string,
-    enabled?: boolean,
-    reason?: string,
-    section?: string,
-  ) => {
-    const initData = getTelegramInitData();
-    if (!initData) { showToast('Нет доступа: не в Telegram'); return; }
-
+  // Сервер отвечает свежей карточкой — её и показываем, без догадок на клиенте.
+  const doAction = async (tgId: string, action: Action, extra: Record<string, unknown> = {}) => {
     setActioning(tgId);
-    try {
-      const body: Record<string, unknown> = { secret, initData, action, tgId };
-      if (action === 'toggle_subject' && subjectId !== undefined) {
-        body.subject = subjectId;
-        body.enable  = enabled;
-      }
-      if (action === 'toggle_section' && subjectId !== undefined && section !== undefined) {
-        body.subject = subjectId;
-        body.section = section;
-        body.enable  = enabled;
-      }
-      if (action === 'block' && reason) {
-        body.reason = reason;
-      }
-      if (action === 'set_contact_username') {
-        body.contactUsername = reason ?? '';
-      }
-      if (action === 'set_study_group') {
-        body.studyGroup = reason ?? '';
-      }
-      if ((action === 'confirm_preview_module' || action === 'reject_preview_module') && section) {
-        body.module = section;
-      }
+    const r = await api('/api/admin-users', { action, tgId, ...extra });
+    setActioning(null);
+    if (!r.ok) { showToast(r.error); return; }
 
-      const r = await fetch('/api/admin-users', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': getTelegramInitData() },
-        body:    JSON.stringify(body),
-      });
-
-      if (!r.ok) {
-        if (action === 'set_contact_username' || action === 'set_study_group') {
-          const err = await r.json().catch(() => ({}));
-          showToast((err as { error?: string }).error || 'Некорректное значение');
-        } else {
-          showToast('Ошибка действия');
-        }
-        return;
-      }
-      const data = await r.json().catch(() => ({}));
-
-      // Удаление — убираем пользователя из списка целиком
-      if (action === 'delete_user') {
-        setUsers(prev => prev.filter(u => u.tgId !== tgId));
-        setTotal(t => Math.max(0, t - 1));
-        showToast('🗑 Пользователь удалён');
-        return;
-      }
-
-      setUsers(prev => {
-        const next = prev.map(u => {
-        if (u.tgId !== tgId) return u;
-        switch (action) {
-          case 'block':
-            return { ...u, blocked: true, blockedReason: reason || 'manual', blockedAt: new Date().toISOString() };
-          case 'unblock':
-            return { ...u, blocked: false, blockedReason: null, blockedAt: null, opensToday: 0, suspicious: false };
-          case 'reset_demo': {
-            const detail = (data.user && typeof data.user === 'object')
-              ? data.user as Partial<User>
-              : null;
-            const navHidden = (data.navHidden && typeof data.navHidden === 'object')
-              ? data.navHidden as Record<string, string[]>
-              : (detail?.navHidden ?? u.navHidden);
-            const subjects = Array.isArray(data.subjects)
-              ? data.subjects
-              : (detail?.subjects ?? u.subjects);
-            return {
-              ...u,
-              ...detail,
-              usedDemo: detail?.previewStatus === 'selecting' ? true : false,
-              previewStatus: detail?.previewStatus ?? null,
-              previewChosenSubject: detail?.previewChosenSubject ?? null,
-              previewChosenModules: detail?.previewChosenModules ?? null,
-              previewNeedsConfirm: false,
-              previewPendingModules: [],
-              previewQuotedPrice: null,
-              previewConfirmedAt: null,
-              receiptClaimedAt: null,
-              subjects,
-              navHidden,
-            };
-          }
-          case 'force_payment_only': {
-            const newSubjects = Array.isArray(data.subjects) ? data.subjects : [];
-            const navHidden = (data.navHidden && typeof data.navHidden === 'object')
-              ? data.navHidden as Record<string, string[]>
-              : u.navHidden;
-            return {
-              ...u,
-              previewStatus: (data.previewStatus as string | null) ?? 'expired',
-              previewChosenSubject: (data.previewChosenSubject as string | null) ?? u.previewChosenSubject,
-              previewChosenModules: Array.isArray(data.previewChosenModules)
-                ? data.previewChosenModules
-                : u.previewChosenModules,
-              previewQuotedPrice: typeof data.previewQuotedPrice === 'number' ? data.previewQuotedPrice : u.previewQuotedPrice,
-              previewConfirmedAt: null,
-              receiptClaimedAt: null,
-              previewNeedsConfirm: data.previewNeedsConfirm === true,
-              previewPendingModules: Array.isArray(data.previewPendingModules)
-                ? data.previewPendingModules
-                : [],
-              previewStartedAt: null,
-              subjects: newSubjects,
-              navHidden,
-              paid: data.paid === true,
-            };
-          }
-          case 'grant_direct_access': {
-            const detail = (data.user && typeof data.user === 'object')
-              ? data.user as Partial<User>
-              : null;
-            const newSubjects = Array.isArray(data.subjects) ? data.subjects : u.subjects;
-            const navHidden = (data.navHidden && typeof data.navHidden === 'object')
-              ? data.navHidden as Record<string, string[]>
-              : u.navHidden;
-            return {
-              ...u,
-              ...detail,
-              previewStatus: null,
-              previewStartedAt: null,
-              previewExpiredAt: null,
-              previewConfirmedAt: (data.previewConfirmedAt as string | null) ?? new Date().toISOString(),
-              previewChosenSubject: null,
-              previewChosenModules: null,
-              previewNeedsConfirm: false,
-              previewPendingModules: [],
-              previewDisplayModules: [],
-              receiptClaimedAt: null,
-              paid: true,
-              studyGroup: (data.studyGroup as string | null) ?? detail?.studyGroup ?? u.studyGroup ?? null,
-              subjects: newSubjects,
-              navHidden,
-            };
-          }
-          case 'confirm_preview':
-          case 'confirm_preview_module': {
-            const newSubjects = Array.isArray(data.subjects) ? data.subjects : u.subjects;
-            const navHidden = (data.navHidden && typeof data.navHidden === 'object')
-              ? data.navHidden as Record<string, string[]>
-              : u.navHidden;
-            return {
-              ...u,
-              previewStatus: (data.previewStatus as string | null) ?? null,
-              previewStartedAt: null,
-              previewExpiredAt: null,
-              previewConfirmedAt: (data.previewConfirmedAt as string | null) ?? u.previewConfirmedAt,
-              previewChosenSubject: (data.previewChosenSubject as string | null) ?? u.previewChosenSubject,
-              previewChosenModules: Array.isArray(data.previewChosenModules)
-                ? data.previewChosenModules
-                : u.previewChosenModules,
-              previewNeedsConfirm: data.previewNeedsConfirm === true,
-              previewPendingModules: Array.isArray(data.previewPendingModules)
-                ? data.previewPendingModules
-                : [],
-              previewDisplayModules: Array.isArray(data.previewDisplayModules)
-                ? data.previewDisplayModules
-                : u.previewDisplayModules,
-              receiptClaimedAt: u.receiptClaimedAt,
-              paid: data.paid === true,
-              activatedKey: u.activatedKey === 'preview' || !u.activatedKey ? 'preview' : u.activatedKey,
-              subjects: newSubjects,
-              navHidden,
-            };
-          }
-          case 'reject_preview_module': {
-            const navHidden = (data.navHidden && typeof data.navHidden === 'object')
-              ? data.navHidden as Record<string, string[]>
-              : u.navHidden;
-            return {
-              ...u,
-              previewStatus: (data.previewStatus as string | null) ?? u.previewStatus,
-              previewNeedsConfirm: data.previewNeedsConfirm === true,
-              previewPendingModules: Array.isArray(data.previewPendingModules)
-                ? data.previewPendingModules
-                : [],
-              previewDisplayModules: Array.isArray(data.previewDisplayModules)
-                ? data.previewDisplayModules
-                : u.previewDisplayModules,
-              receiptClaimedAt: (data.receiptClaimedAt as string | null) ?? u.receiptClaimedAt,
-              navHidden,
-            };
-          }
-          case 'reopen_preview_vitrine':
-            return {
-              ...u,
-              previewStatus: 'selecting',
-              previewChosenSubject: null,
-              previewChosenModules: null,
-              previewQuotedPrice: null,
-              receiptClaimedAt: null,
-              previewNeedsConfirm: false,
-              previewStartedAt: null,
-              previewExpiredAt: null,
-            };
-          case 'toggle_paid':
-            return { ...u, paid: !u.paid };
-          case 'set_study_group':
-            return { ...u, studyGroup: (data.studyGroup as string | null) ?? u.studyGroup };
-          case 'set_contact_username': {
-            const handle = String(reason ?? '').trim();
-            return {
-              ...u,
-              contactUsername: handle ? normalizeTelegramUsername(handle) : null,
-            };
-          }
-          case 'toggle_subject': {
-            if (!subjectId) return u;
-            const newSubjects = enabled
-              ? Array.from(new Set([...u.subjects, subjectId]))
-              : u.subjects.filter(s => s !== subjectId);
-            const fallbackNav: Record<string, string[]> = { ...(u.navHidden || {}) };
-            if (enabled) {
-              fallbackNav[subjectId] = NAV_SECTIONS.map(s => s.id);
-            } else {
-              delete fallbackNav[subjectId];
-            }
-            const navHidden = (data.navHidden && typeof data.navHidden === 'object')
-              ? data.navHidden as Record<string, string[]>
-              : fallbackNav;
-            return {
-              ...u,
-              subjects: newSubjects,
-              hasMicro: newSubjects.includes('micro'),
-              navHidden,
-              previewStatus: (data.previewStatus as string | null) ?? u.previewStatus,
-              previewConfirmedAt: (data.previewConfirmedAt as string | null) ?? u.previewConfirmedAt,
-              previewChosenSubject: (data.previewChosenSubject as string | null) ?? u.previewChosenSubject,
-              paid: data.previewConfirmedAt ? true : u.paid,
-            };
-          }
-          case 'toggle_section': {
-            if (!subjectId || !section) return u;
-            const fallbackNav = { ...(u.navHidden || {}) };
-            const set = new Set<string>(fallbackNav[subjectId] || []);
-            if (enabled) set.delete(section); else set.add(section);
-            if (set.size === 0) delete fallbackNav[subjectId];
-            else fallbackNav[subjectId] = [...set];
-            const navHidden = (data.navHidden && typeof data.navHidden === 'object')
-              ? data.navHidden as Record<string, string[]>
-              : fallbackNav;
-            return {
-              ...u,
-              navHidden,
-              previewStatus: (data.previewStatus as string | null) ?? u.previewStatus,
-              previewConfirmedAt: (data.previewConfirmedAt as string | null) ?? u.previewConfirmedAt,
-              previewChosenSubject: (data.previewChosenSubject as string | null) ?? u.previewChosenSubject,
-              paid: data.previewConfirmedAt ? true : u.paid,
-            };
-          }
-          default:
-            return u;
-        }
-        });
-        if (action === 'toggle_paid' && filter === 'unpaid') {
-          return next.filter(u => !(u.tgId === tgId && u.paid));
-        }
-        return next;
-      });
-
-      if (action === 'confirm_preview' || action === 'confirm_preview_module' || action === 'reject_preview_module') {
-        void fetchUserDetail(secret, tgId);
-      }
-
-      if (action === 'reset_demo') setDemoCount(c => Math.max(0, c - 1));
-      if (action === 'toggle_paid') {
-        const nowPaid = !users.find(u => u.tgId === tgId)?.paid;
-        setUnpaidCount(c => Math.max(0, nowPaid ? c - 1 : c + 1));
-      }
-
-      let msg = '';
-      switch (action) {
-        case 'block':          msg = '🚫 Заблокирован'; break;
-        case 'unblock':        msg = '✓ Разблокирован'; break;
-        case 'reset_demo':     msg = '✓ Пробный доступ сброшен'; break;
-        case 'grant_direct_access': msg = '✓ Доступ открыт без пробника'; break;
-        case 'force_payment_only': msg = '💳 Только экраны оплаты'; break;
-        case 'confirm_preview':
-        case 'confirm_preview_module': msg = '✓ Раздел подтверждён'; break;
-        case 'reject_preview_module': msg = '↩ Отказ по разделу'; break;
-        case 'reopen_preview_vitrine': msg = '↩ Студент возвращён на витрину'; break;
-        case 'toggle_paid': {
-          const nowPaid = !users.find(u => u.tgId === tgId)?.paid;
-          msg = nowPaid ? '💲 Отмечено как оплачено' : 'Отметка оплаты снята';
-          break;
-        }
-        case 'toggle_subject': {
-          const subj  = availableSubjects.find(s => s.id === subjectId);
-          const label = subj?.shortLabel || subjectId;
-          msg = enabled ? `✓ ${label} выдано` : `${label} отозвано`;
-          break;
-        }
-        case 'toggle_section': {
-          const sectionLabel = NAV_SECTIONS.find(s => s.id === section)?.label || section;
-          const subj  = availableSubjects.find(s => s.id === subjectId);
-          const subjLabel = subj?.shortLabel || subjectId;
-          msg = enabled ? `✓ «${sectionLabel}» включён в ${subjLabel}` : `«${sectionLabel}» скрыт в ${subjLabel}`;
-          break;
-        }
-        case 'set_study_group':
-          msg = `✓ Группа ${String(data.studyGroup ?? '')} закреплена`;
-          break;
-        case 'set_contact_username': {
-          const handle = String(reason ?? '').trim();
-          msg = handle ? `✓ Контакт @${normalizeTelegramUsername(handle)} сохранён` : 'Контакт удалён';
-          break;
-        }
-      }
-      if (msg) showToast(msg);
-    } finally {
-      setActioning(null);
+    if (action === 'delete_user') {
+      setUsers(prev => prev.filter(u => u.tgId !== tgId));
+      setExpandedIds(new Set());
+      showToast('🗑 Пользователь удалён');
+      void refreshCounts();
+      return;
     }
+
+    const updated = r.data.user as User | null | undefined;
+    if (updated) mergeUser(updated);
+
+    const subjectLabel = (id: unknown) =>
+      availableSubjects.find(s => s.id === id)?.shortLabel || String(id ?? '');
+    const messages: Partial<Record<Action, string>> = {
+      block:                  '🚫 Заблокирован',
+      unblock:                '✓ Разблокирован',
+      reset_demo:             '✓ Пробный доступ сброшен',
+      grant_direct_access:    '✓ Доступ открыт',
+      force_payment_only:     '💳 Студенту оставлен только экран оплаты',
+      confirm_preview_module: '✓ Раздел подтверждён',
+      reject_preview_module:  '↩ Отказ по разделу',
+      reopen_preview_vitrine: '↩ Студент возвращён на витрину',
+      toggle_paid:            updated?.paid ? '💲 Отмечено как оплачено' : 'Отметка оплаты снята',
+      toggle_subject:         extra.enable
+        ? `✓ ${subjectLabel(extra.subject)} выдан — включи нужные разделы ниже`
+        : `${subjectLabel(extra.subject)} отозван`,
+      toggle_section:         `${extra.enable ? '✓ Включён' : 'Скрыт'} раздел «${
+        NAV_SECTIONS.find(s => s.id === extra.section)?.label || extra.section}» · ${subjectLabel(extra.subject)}`,
+      set_study_group:        `✓ Группа ${updated?.studyGroup ?? ''} закреплена`,
+      set_contact_username:   updated?.contactUsername ? `✓ Контакт @${updated.contactUsername} сохранён` : 'Контакт удалён',
+    };
+    const msg = messages[action];
+    if (msg) showToast(msg);
+    void refreshCounts();
   };
 
   const loadMoreUsers = () => {
     if (!hasMore || loading || refreshing) return;
-    fetchUsers(secret, { page: page + 1, append: true, background: true });
+    void fetchUsers({ page: page + 1, append: true, background: true });
   };
   // ─── ЭКРАН ВХОДА ───────────────────────────────────────────────────────────
   const loginScreen = (
@@ -2263,8 +1938,7 @@ export default function AdminPage() {
         }}>Графический ключ</div>
 
         <AdminPatternLock
-          expectedPattern={[...ADMIN_PATTERN]}
-          onSuccess={handlePatternUnlock}
+          onSubmit={handlePatternSubmit}
           disabled={loading}
           theme={{
             accent: T.accent,
@@ -2340,7 +2014,7 @@ export default function AdminPage() {
           </div>
         </div>
         <button
-          onClick={() => fetchUsers(secret, { page: 1, append: false, background: true })}
+          onClick={() => { void fetchUsers({ page: 1, append: false, background: true }); }}
           disabled={loading || refreshing}
           style={{
             width: 36, height: 36, borderRadius: 10,
@@ -3627,7 +3301,7 @@ export default function AdminPage() {
           <StatTile label="Всего"   value={total}           accent={T.info} />
           <StatTile label="Блок"    value={blockedCount}    accent={T.danger} />
           <StatTile label="Подозр"  value={suspiciousCount} accent={T.warn} />
-          <StatTile label="Микро"   value={microCount}      accent={T.success} />
+          <StatTile label="С доступом" value={accessCount}  accent={T.success} />
         </div>
 
         {/* демо-баннер */}
@@ -3770,6 +3444,7 @@ export default function AdminPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {users.map(u => (
                 <UserCard
+                  catalog={previewCatalogBase}
                   key={u.tgId} user={u} actioning={actioning}
                   onAction={doAction}
                   expanded={expandedIds.has(u.tgId)}
