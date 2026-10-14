@@ -116,14 +116,33 @@ export function isRuleCurrentlyActive(rule: GroupAccessRule, nowMs = Date.now())
   return true;
 }
 
-export async function loadGroupAccessRules(redis: AppRedis): Promise<GroupAccessRule[]> {
-  const raw = await redis.get(GROUP_ACCESS_RULES_KEY);
-  if (!Array.isArray(raw)) return [];
-  return raw.filter(isGroupAccessRule);
+/**
+ * Правила нужны каждому входу и каждому запросу контента, а лежат одним
+ * JSON на все группы × предметы. Раньше check_subjects скачивал и разбирал
+ * его дважды за запрос, параллельные запросы — каждый свою копию. Теперь
+ * копия на процесс живёт несколько секунд, одновременные запросы ждут одну
+ * загрузку, а сохранение из админки сразу обновляет копию.
+ */
+const RULES_CACHE_MS = 5_000;
+const rulesCache = new WeakMap<object, { at: number; rules: Promise<GroupAccessRule[]> }>();
+
+/** Правила общие для всех запросов процесса — не изменять. */
+export function loadGroupAccessRules(redis: AppRedis): Promise<GroupAccessRule[]> {
+  const cached = rulesCache.get(redis);
+  if (cached && Date.now() - cached.at < RULES_CACHE_MS) return cached.rules;
+
+  const rules = redis.get(GROUP_ACCESS_RULES_KEY)
+    .then(raw => (Array.isArray(raw) ? raw.filter(isGroupAccessRule) : []));
+  rulesCache.set(redis, { at: Date.now(), rules });
+  rules.catch(() => {
+    if (rulesCache.get(redis)?.rules === rules) rulesCache.delete(redis);
+  });
+  return rules;
 }
 
 export async function saveGroupAccessRules(redis: AppRedis, rules: GroupAccessRule[]): Promise<void> {
   await redis.set(GROUP_ACCESS_RULES_KEY, rules);
+  rulesCache.set(redis, { at: Date.now(), rules: Promise.resolve(rules) });
 }
 
 function isGroupAccessRule(v: unknown): v is GroupAccessRule {

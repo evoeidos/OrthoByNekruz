@@ -238,22 +238,13 @@ const END = '// </generated:methodichki>';
 const s = seed.indexOf(START);
 const e = seed.indexOf(END);
 if (s >= 0 && e > s) {
-  const ident = f => 'm_' + f.replace(/\.json$/, '').replace(/[^a-zA-Z0-9]/g, '_');
   const existing = fs.readdirSync(OUT_DIR)
     .filter(f => /^(bio|fizo|gista|bioxim|chem|eng|micro|pharma|patan|patfiz|therapy|ortho)-[a-z]+-\d+\.json$/.test(f))
     .sort();
-  const imports = existing.map(f => `import ${ident(f)} from '@/data/programs/${f}';`).join('\n');
-  const list = existing.map(f => `  ${ident(f)},`).join('\n');
-  // импорты вставляются выше блока, список — внутри
-  const block = `${START}\nconst METHODICHKI_PROGRAMS: unknown[] = [\n${list}\n];\n${END}`;
-  let next = seed.slice(0, s) + block + seed.slice(e + END.length);
-  const IMP_START = '// <generated:imports>';
-  const IMP_END = '// </generated:imports>';
-  const is = next.indexOf(IMP_START);
-  const ie = next.indexOf(IMP_END);
-  if (is >= 0 && ie > is) {
-    next = next.slice(0, is) + `${IMP_START}\n${imports}\n${IMP_END}` + next.slice(ie + IMP_END.length);
-  }
+  // Только имена файлов: curriculumSeed грузит их лениво через import().
+  const list = existing.map(f => `  '${f}',`).join('\n');
+  const block = `${START}\nconst METHODICHKI_FILES: string[] = [\n${list}\n];\n${END}`;
+  const next = seed.slice(0, s) + block + seed.slice(e + END.length);
   fs.writeFileSync(SEED_FILE, next);
   console.log('curriculumSeed.ts обновлён:', existing.length, 'файлов');
 } else {

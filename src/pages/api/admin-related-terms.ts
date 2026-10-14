@@ -4,7 +4,8 @@
 // subject-data.ts мёржит эти оверрайды при отдаче данных студентам.
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
-import { getSubject, getAllDataFileNames } from '@/lib/subjects';
+import { getSubject } from '@/lib/subjects';
+import { loadDataFile } from '@/lib/dataFiles';
 import { verifyAdminRequest } from '@/lib/adminAuth';
 
 const redis        = createRedisFromEnv();
@@ -25,16 +26,9 @@ function getFileName(subjectId: string, type: SectionType): string | null {
   }
 }
 
-function loadFile(fileName: string): unknown[] | null {
-  const allowed = getAllDataFileNames();
-  if (!allowed.includes(fileName)) return null;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const data = require(`../../data/${fileName}`);
-    return Array.isArray(data) ? data : null;
-  } catch {
-    return null;
-  }
+async function loadFile(fileName: string): Promise<unknown[] | null> {
+  const data = await loadDataFile(fileName);
+  return Array.isArray(data) ? data : null;
 }
 
 // Strips markdown bold/italic markers and returns first N chars
@@ -71,7 +65,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const fileName = getFileName(subjectId, sectionType);
     if (!fileName) return res.status(400).json({ error: 'Unknown subject' });
 
-    const data = loadFile(fileName);
+    const data = await loadFile(fileName);
     if (!data) return res.status(404).json({ error: 'Data file not found' });
 
     const overrides = await getOverrides(subjectId, sectionType);

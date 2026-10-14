@@ -11,11 +11,13 @@ import type { AppRedis } from '@/lib/redis';
 import type { FacultyId } from '@/lib/groupRegistry';
 import { getSubject } from '@/lib/subjects';
 import { normalizeStudyGroup } from '@/lib/studyGroup';
-import { listSeedPrograms } from '@/lib/curriculumSeed';
+import { readSeedPrograms, yieldToEventLoop } from '@/lib/curriculumSeed';
 
 export const CURRICULUM_INDEX_KEY = 'curriculum:index';
 export const CURRICULUM_SUPPRESSED_KEY = 'curriculum:suppressed';
 export const GROUP_PROGRAMS_KEY = 'curriculum:group_programs';
+/** Счётчик правок планов: по нему процессы понимают, что кэш планов устарел. */
+export const CURRICULUM_REV_KEY = 'curriculum:rev';
 
 export function programKey(programId: string): string {
   return `curriculum:program:${programId}`;
@@ -388,22 +390,34 @@ async function loadSuppressedIds(redis: AppRedis): Promise<Set<string>> {
   return new Set(raw.map(v => String(v)).filter(Boolean));
 }
 
-let seedProgramsCache: Program[] | null = null;
+type SeedIndex = { list: Program[]; byId: Map<string, Program> };
 
-/** Планы из файлов проекта, помеченные builtIn. Файлы не меняются между деплоями — считаем один раз. */
-function seedPrograms(): Program[] {
-  if (seedProgramsCache) return seedProgramsCache;
-  const out: Program[] = [];
-  for (const raw of listSeedPrograms()) {
-    const program = normalizeProgram(raw);
-    if (program) out.push({ ...program, builtIn: true });
+let seedProgramsPromise: Promise<SeedIndex> | null = null;
+
+/**
+ * Планы из файлов проекта, помеченные builtIn. Файлы не меняются между
+ * деплоями — считаем один раз за процесс. Разбор идёт по одному плану с
+ * паузами: целиком (13 МБ) он держал процесс секундами, и все запросы
+ * студентов в это время стояли.
+ */
+function seedPrograms(): Promise<SeedIndex> {
+  if (!seedProgramsPromise) {
+    seedProgramsPromise = (async () => {
+      const list: Program[] = [];
+      for await (const raw of readSeedPrograms()) {
+        const program = normalizeProgram(raw);
+        if (program) list.push({ ...program, builtIn: true });
+        await yieldToEventLoop();
+      }
+      return { list, byId: new Map(list.map(p => [p.id, p])) };
+    })();
+    seedProgramsPromise.catch(() => { seedProgramsPromise = null; });
   }
-  seedProgramsCache = out;
-  return out;
+  return seedProgramsPromise;
 }
 
-function seedProgramById(programId: string): Program | null {
-  return seedPrograms().find(p => p.id === programId) ?? null;
+async function seedProgramById(programId: string): Promise<Program | null> {
+  return (await seedPrograms()).byId.get(programId) ?? null;
 }
 
 function mergeSectionImages(stored: LessonSection, seed?: LessonSection): LessonSection {
@@ -435,8 +449,7 @@ function mergeLessonFromSeed(stored: Lesson, seed?: Lesson): Lesson {
  * Копия в Redis перекрывает файлы проекта. Недостающие занятия и новые
  * картинки из seed добираем, чтобы тема 1 со схемами не вытесняла остальные.
  */
-function hydrateFromSeed(stored: Program): Program {
-  const seed = seedProgramById(stored.id);
+function hydrateFromSeed(stored: Program, seed: Program | undefined): Program {
   if (!seed) return stored;
 
   const seedById = new Map(seed.lessons.map(l => [l.id, l]));
@@ -462,31 +475,67 @@ export async function loadProgram(redis: AppRedis, programId: string): Promise<P
   if (suppressed.has(programId)) return null;
 
   const stored = normalizeProgram(await redis.get(programKey(programId)));
-  if (stored) return { ...hydrateFromSeed(stored), builtIn: false };
-  return seedProgramById(programId);
+  const seed = await seedProgramById(programId);
+  if (stored) return { ...hydrateFromSeed(stored, seed ?? undefined), builtIn: false };
+  return seed;
 }
 
-export async function loadAllPrograms(redis: AppRedis): Promise<Program[]> {
-  const [ids, suppressed] = await Promise.all([
+/** Собранные планы на процесс — пока счётчик правок в Redis не сменился. */
+const programsCache = new WeakMap<object, { rev: string; programs: Promise<Program[]> }>();
+
+async function buildAllPrograms(redis: AppRedis): Promise<Program[]> {
+  const [ids, suppressed, seed] = await Promise.all([
     listProgramIds(redis),
     loadSuppressedIds(redis),
+    seedPrograms(),
   ]);
 
   const byId = new Map<string, Program>();
-  for (const program of seedPrograms()) {
+  for (const program of seed.list) {
     byId.set(program.id, program);
   }
-  for (const id of ids) {
-    const stored = normalizeProgram(await redis.get(programKey(id)));
-    if (stored) byId.set(id, { ...hydrateFromSeed(stored), builtIn: false });
+  // Копии планов из админки — по мегабайту и больше: забираем разом, а
+  // разбираем по одному с паузами, чтобы не держать процесс.
+  const storedRaw = await Promise.all(ids.map(id => redis.get(programKey(id))));
+  for (let i = 0; i < ids.length; i++) {
+    const stored = normalizeProgram(storedRaw[i]);
+    storedRaw[i] = null;
+    if (stored) byId.set(ids[i], { ...hydrateFromSeed(stored, seed.byId.get(ids[i])), builtIn: false });
+    await yieldToEventLoop();
   }
 
   return [...byId.values()]
-    .filter(p => !suppressed.has(p.id) || seedProgramById(p.id) != null)
+    .filter(p => !suppressed.has(p.id) || seed.byId.has(p.id))
     .sort((a, b) => {
       if (a.course !== b.course) return a.course - b.course;
       return a.title.localeCompare(b.title, 'ru');
     });
+}
+
+/**
+ * Все планы. Раньше каждый запрос вкладки «Занятия» (и каждое открытие
+ * занятия) заново тянул из Redis и разбирал все планы — мегабайты JSON на
+ * запрос: процесс стоял, а соединение с Redis было забито, и чужие команды
+ * не укладывались в таймаут. Теперь сборка одна на правку: по запросу
+ * читается только счётчик curriculum:rev. Возвращаемые планы общие —
+ * не изменять.
+ */
+export async function loadAllPrograms(redis: AppRedis): Promise<Program[]> {
+  const rev = String((await redis.get(CURRICULUM_REV_KEY)) ?? '0');
+  const cached = programsCache.get(redis);
+  if (cached && cached.rev === rev) return [...(await cached.programs)];
+
+  const programs = buildAllPrograms(redis);
+  programsCache.set(redis, { rev, programs });
+  programs.catch(() => {
+    if (programsCache.get(redis)?.programs === programs) programsCache.delete(redis);
+  });
+  return [...(await programs)];
+}
+
+async function bumpCurriculumRev(redis: AppRedis): Promise<void> {
+  await redis.incr(CURRICULUM_REV_KEY);
+  programsCache.delete(redis);
 }
 
 export async function saveProgram(redis: AppRedis, program: Program): Promise<Program> {
@@ -507,6 +556,7 @@ export async function saveProgram(redis: AppRedis, program: Program): Promise<Pr
   if (suppressed.delete(next.id)) {
     await redis.set(CURRICULUM_SUPPRESSED_KEY, [...suppressed]);
   }
+  await bumpCurriculumRev(redis);
   return next;
 }
 
@@ -516,11 +566,12 @@ export async function deleteProgram(redis: AppRedis, programId: string): Promise
   await redis.set(CURRICULUM_INDEX_KEY, ids.filter(id => id !== programId));
 
   // План из файла проекта иначе вернулся бы после удаления.
-  if (seedProgramById(programId)) {
+  if (await seedProgramById(programId)) {
     const suppressed = await loadSuppressedIds(redis);
     suppressed.add(programId);
     await redis.set(CURRICULUM_SUPPRESSED_KEY, [...suppressed]);
   }
+  await bumpCurriculumRev(redis);
 
   const assignments = await loadGroupPrograms(redis);
   let changed = false;

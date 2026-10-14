@@ -24,7 +24,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createRedisFromEnv } from '@/lib/redis';
 import { applyGroupAccessToUser, loadGroupAccessRules } from '@/lib/groupAccess';
-import { getSubject, getAllDataFileNames } from '@/lib/subjects';
+import { getSubject } from '@/lib/subjects';
+import { loadDataFile } from '@/lib/dataFiles';
 import { resolveBioQuestionsFile } from '@/lib/bioQuestions';
 import { filterBioTasksForFaculty, resolveBioFacultyId, resolveBioTasksFile } from '@/lib/bioTasks';
 import { filterChemTasksForFaculty, resolveChemFacultyId, resolveChemTasksFile } from '@/lib/chemTasks';
@@ -47,21 +48,6 @@ function userHasSubject(user: any, subjectId: string): boolean {
   if (subjectId === 'ortho') return !!user.activatedKey;
   if (subjectId === 'micro') return user.micro === true;
   return false;
-}
-
-// ─── Динамическая загрузка JSON по имени файла ─────────────────────────────
-// Имя строго whitelist'ится через getAllDataFileNames(), так что в require
-// попадает только зарегистрированный в SUBJECTS файл. Если JSON ещё не
-// создан — отдаём null, и хендлер вернёт 404 с осмысленным сообщением.
-function loadDataFile(fileName: string): unknown | null {
-  const allowed = getAllDataFileNames();
-  if (!allowed.includes(fileName)) return null;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return require(`../../data/${fileName}`);
-  } catch {
-    return null;
-  }
 }
 
 type ModuleDataType = 'questions' | 'tests' | 'tasks' | 'glossary';
@@ -88,11 +74,11 @@ function moduleAccessError(
 }
 
 /** Данные раздела: файл по факультету и, для задач, фильтр по факультету. */
-function loadModuleData(
+async function loadModuleData(
   subjectCfg: SubjectCfg,
   user: any,
   dataType: ModuleDataType,
-): { data: unknown } | { status: number; error: string; hint?: string } {
+): Promise<{ data: unknown } | { status: number; error: string; hint?: string }> {
   let fileName: string | null = null;
   switch (dataType) {
     case 'questions':
@@ -119,7 +105,7 @@ function loadModuleData(
     case 'glossary':  fileName = subjectCfg.glossaryFile;  break;
   }
 
-  const data = loadDataFile(fileName);
+  const data = await loadDataFile(fileName);
   if (data === null) {
     return {
       status: 404,
@@ -214,8 +200,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const denied = moduleAccessError(user, subjectCfg.id, mod, String(telegramId));
         if (denied) return res.status(403).json({ error: denied });
       }
-      const questions = loadModuleData(subjectCfg, user, 'questions');
-      const tasks = loadModuleData(subjectCfg, user, 'tasks');
+      const [questions, tasks] = await Promise.all([
+        loadModuleData(subjectCfg, user, 'questions'),
+        loadModuleData(subjectCfg, user, 'tasks'),
+      ]);
       const qList = 'data' in questions && Array.isArray(questions.data) ? questions.data : [];
       const tList = 'data' in tasks && Array.isArray(tasks.data) ? tasks.data : [];
       const tickets = hasExamTicketData(subjectCfg.id, qList, tList)
@@ -232,7 +220,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (denied) return res.status(403).json({ error: denied });
 
     // 3. Выбор файла по type
-    const loaded = loadModuleData(subjectCfg, user, dataType);
+    const loaded = await loadModuleData(subjectCfg, user, dataType);
     if ('status' in loaded) {
       return res.status(loaded.status).json({ error: loaded.error, hint: loaded.hint });
     }
