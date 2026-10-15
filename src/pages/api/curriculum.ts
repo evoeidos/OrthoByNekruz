@@ -24,6 +24,7 @@ import { loadDataFile } from '@/lib/dataFiles';
 import { attachLessonTestAnswers } from '@/lib/lessonTestAnswers';
 import { resolveBioximTestsFile } from '@/lib/bioximTests';
 import { resolveHygTestsFile } from '@/lib/hygTests';
+import { resolvePatfizTestsFile } from '@/lib/patfizTests';
 import { canReadSubjectModule, userHasSubject } from '@/lib/subjectAccess';
 
 const redis = createRedisFromEnv();
@@ -136,6 +137,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       let testAnswersLocked = false;
       const testsFile = program.subjectId === 'bioxim' ? resolveBioximTestsFile(program.facultyId)
         : program.subjectId === 'hyg' ? resolveHygTestsFile(program.facultyId)
+        : program.subjectId === 'patfiz' ? resolvePatfizTestsFile(program.facultyId)
         : getSubject(program.subjectId)?.testsFile;
       if (tests?.length && testsFile) {
         const withAnswers = attachLessonTestAnswers(tests, await loadDataFile(testsFile));

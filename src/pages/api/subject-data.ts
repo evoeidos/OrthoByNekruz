@@ -31,6 +31,7 @@ import { filterBioTasksForFaculty, resolveBioFacultyId, resolveBioTasksFile } fr
 import { filterChemTasksForFaculty, resolveChemFacultyId, resolveChemTasksFile } from '@/lib/chemTasks';
 import { resolveBioximTestsFile } from '@/lib/bioximTests';
 import { resolveHygTestsFile } from '@/lib/hygTests';
+import { resolvePatfizTestsFile } from '@/lib/patfizTests';
 import { computePreviewExpiry, isPreviewExpired } from '@/lib/preview';
 import { type ModuleDataType, moduleAccessError, userHasSubject } from '@/lib/subjectAccess';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
@@ -72,9 +73,11 @@ async function loadModuleData(
       }
       break;
     case 'tests':
-      // У педиатров по биохимии свой банк тестов, по гигиене — у каждого факультета
+      // У педиатров по биохимии свой банк тестов, по гигиене — у каждого факультета,
+      // по патофизиологии — у стоматологов и у лечебного дела с педиатрией
       fileName = subjectCfg.id === 'bioxim' ? resolveBioximTestsFile(resolveBioFacultyId(user))
         : subjectCfg.id === 'hyg' ? resolveHygTestsFile(resolveBioFacultyId(user))
+        : subjectCfg.id === 'patfiz' ? resolvePatfizTestsFile(resolveBioFacultyId(user))
         : subjectCfg.testsFile;
       break;
     case 'glossary':  fileName = subjectCfg.glossaryFile;  break;

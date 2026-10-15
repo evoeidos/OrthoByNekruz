@@ -19,6 +19,7 @@ import { BIO_TASKS_PED_FILE, BIO_TASKS_STOM_FILE, BIO_TASKS_THERAPEUTIC_FILE, re
 import { CHEM_TASKS_FILE, resolveChemFacultyId } from '@/lib/chemTasks';
 import { BIOXIM_TESTS_PED_FILE } from '@/lib/bioximTests';
 import { HYG_TESTS_PED_FILE, HYG_TESTS_STOM_FILE, HYG_TESTS_THERAPEUTIC_FILE } from '@/lib/hygTests';
+import { PATFIZ_TESTS_STOM_FILE, PATFIZ_TESTS_THER_PED_FILE } from '@/lib/patfizTests';
 
 /** Название университета в шапке всех дисциплин */
 export const APP_BRAND_NAME = 'КрасГМУ';
@@ -295,7 +296,7 @@ export const SUBJECTS: SubjectConfig[] = [
     iconVariant:    'normal',
     questionsFile:  'patfiz_questions.json',
     tasksFile:      'patfiz_tasks.json',
-    testsFile:      'patfiz_tests.json',
+    testsFile:      PATFIZ_TESTS_STOM_FILE,
     glossaryFile:   'patfiz_glossary.json',
     lsPrefix:       'patfiz',
     freeWithKey:    false,
@@ -574,5 +575,6 @@ export function getAllDataFileNames(): string[] {
   names.add(BIOXIM_TESTS_PED_FILE);
   names.add(HYG_TESTS_PED_FILE);
   names.add(HYG_TESTS_THERAPEUTIC_FILE);
+  names.add(PATFIZ_TESTS_THER_PED_FILE);
   return [...names];
 }
