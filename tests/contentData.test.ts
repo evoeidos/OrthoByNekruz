@@ -26,7 +26,7 @@ function readJson(file: string): unknown {
 
 const dataFiles = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
 const kindOf = (file: string) =>
-  /tests\.json$/.test(file) ? 'tests'
+  /tests(_[a-z]+)?\.json$/.test(file) ? 'tests'
     : /ticket/i.test(file) && !/report/.test(file) ? 'tickets'
     : /glossary/.test(file) ? 'glossary'
     : /questions|tasks/.test(file) ? 'qa'

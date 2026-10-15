@@ -29,6 +29,7 @@ import { loadDataFile } from '@/lib/dataFiles';
 import { resolveBioQuestionsFile } from '@/lib/bioQuestions';
 import { filterBioTasksForFaculty, resolveBioFacultyId, resolveBioTasksFile } from '@/lib/bioTasks';
 import { filterChemTasksForFaculty, resolveChemFacultyId, resolveChemTasksFile } from '@/lib/chemTasks';
+import { resolveBioximTestsFile } from '@/lib/bioximTests';
 import { computePreviewExpiry, isPreviewExpired } from '@/lib/preview';
 import { type ModuleDataType, moduleAccessError, userHasSubject } from '@/lib/subjectAccess';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
@@ -69,7 +70,12 @@ async function loadModuleData(
         fileName = subjectCfg.tasksFile;
       }
       break;
-    case 'tests':     fileName = subjectCfg.testsFile;     break;
+    case 'tests':
+      // У педиатров по биохимии свой банк тестов
+      fileName = subjectCfg.id === 'bioxim'
+        ? resolveBioximTestsFile(resolveBioFacultyId(user))
+        : subjectCfg.testsFile;
+      break;
     case 'glossary':  fileName = subjectCfg.glossaryFile;  break;
   }
 
