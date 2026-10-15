@@ -17,6 +17,7 @@
 import { BIO_QUESTIONS_PED_FILE, BIO_QUESTIONS_THERAPEUTIC_FILE } from '@/lib/bioQuestions';
 import { BIO_TASKS_PED_FILE, BIO_TASKS_STOM_FILE, BIO_TASKS_THERAPEUTIC_FILE, resolveBioFacultyId } from '@/lib/bioTasks';
 import { CHEM_TASKS_FILE, resolveChemFacultyId } from '@/lib/chemTasks';
+import { HYG_TESTS_PED_FILE, HYG_TESTS_STOM_FILE, HYG_TESTS_THERAPEUTIC_FILE } from '@/lib/hygTests';
 
 /** Название университета в шапке всех дисциплин */
 export const APP_BRAND_NAME = 'КрасГМУ';
@@ -321,6 +322,27 @@ export const SUBJECTS: SubjectConfig[] = [
     questionGameModes: true,
   },
 
+  // ═════════════════════════ ГИГИЕНА ══════════════════════════════════════
+  // Тесты — по факультету студента (src/lib/hygTests.ts), здесь файл по умолчанию.
+  {
+    id:             'hyg',
+    label:          'Гигиена',
+    shortLabel:     'hyg',
+    sub:            'Вопросы · Тесты · Задачи',
+    badge:          '2–3 курс',
+    color:          'hsl(88 55% 42%)',
+    dimColor:       'hsl(88 55% 42% / 0.12)',
+    borderColor:    'hsl(88 55% 42% / 0.28)',
+    iconVariant:    'normal',
+    questionsFile:  'hyg_questions.json',
+    tasksFile:      'hyg_tasks.json',
+    testsFile:      HYG_TESTS_STOM_FILE,
+    glossaryFile:   'hyg_glossary.json',
+    lsPrefix:       'hyg',
+    freeWithKey:    false,
+    availableInDemo: false,
+  },
+
 // ═════════════════════ Английский для педиатров 1 курс ════════════════════════
   {
     id:             'eng',
@@ -548,5 +570,7 @@ export function getAllDataFileNames(): string[] {
   names.add(BIO_TASKS_PED_FILE);
   names.add(BIO_TASKS_THERAPEUTIC_FILE);
   names.add(CHEM_TASKS_FILE);
+  names.add(HYG_TESTS_PED_FILE);
+  names.add(HYG_TESTS_THERAPEUTIC_FILE);
   return [...names];
 }

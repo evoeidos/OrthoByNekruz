@@ -29,6 +29,8 @@ import { loadDataFile } from '@/lib/dataFiles';
 import { resolveBioQuestionsFile } from '@/lib/bioQuestions';
 import { filterBioTasksForFaculty, resolveBioFacultyId, resolveBioTasksFile } from '@/lib/bioTasks';
 import { filterChemTasksForFaculty, resolveChemFacultyId, resolveChemTasksFile } from '@/lib/chemTasks';
+import { resolveUserFacultyPromo } from '@/lib/facultyCodes';
+import { resolveHygTestsFile } from '@/lib/hygTests';
 import { computePreviewExpiry, isPreviewExpired } from '@/lib/preview';
 import { type ModuleDataType, moduleAccessError, userHasSubject } from '@/lib/subjectAccess';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
@@ -69,7 +71,11 @@ async function loadModuleData(
         fileName = subjectCfg.tasksFile;
       }
       break;
-    case 'tests':     fileName = subjectCfg.testsFile;     break;
+    case 'tests':
+      fileName = subjectCfg.id === 'hyg'
+        ? resolveHygTestsFile(resolveUserFacultyPromo(user)?.id ?? user?.facultyId)
+        : subjectCfg.testsFile;
+      break;
     case 'glossary':  fileName = subjectCfg.glossaryFile;  break;
   }
 

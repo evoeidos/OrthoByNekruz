@@ -16,6 +16,10 @@ const DATA_DIR = path.join(__dirname, '..', 'src', 'data');
 const KNOWN_TESTS_WITHOUT_ANSWER: Record<string, Array<string | number>> = {
   'gista_tests.json': [138, 152, 163, 404, 405, 407, 409, 581, 603],
   'fizo_tests.json': [786],
+  // Раздел 1, вопросы 17–20: в ключе всех трёх изданий сборника их нет
+  'hyg_tests_stomatology.json': ['017', '018', '019', '020'],
+  'hyg_tests_pediatrics.json': ['017', '018', '019', '020'],
+  'hyg_tests_therapeutic.json': ['017', '018', '019', '020'],
 };
 
 type Item = Record<string, unknown>;
