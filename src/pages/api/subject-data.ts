@@ -29,7 +29,7 @@ import { loadDataFile } from '@/lib/dataFiles';
 import { resolveBioQuestionsFile } from '@/lib/bioQuestions';
 import { filterBioTasksForFaculty, resolveBioFacultyId, resolveBioTasksFile } from '@/lib/bioTasks';
 import { filterChemTasksForFaculty, resolveChemFacultyId, resolveChemTasksFile } from '@/lib/chemTasks';
-import { resolveUserFacultyPromo } from '@/lib/facultyCodes';
+import { resolveBioximTestsFile } from '@/lib/bioximTests';
 import { resolveHygTestsFile } from '@/lib/hygTests';
 import { computePreviewExpiry, isPreviewExpired } from '@/lib/preview';
 import { type ModuleDataType, moduleAccessError, userHasSubject } from '@/lib/subjectAccess';
@@ -72,8 +72,9 @@ async function loadModuleData(
       }
       break;
     case 'tests':
-      fileName = subjectCfg.id === 'hyg'
-        ? resolveHygTestsFile(resolveUserFacultyPromo(user)?.id ?? user?.facultyId)
+      // У педиатров по биохимии свой банк тестов, по гигиене — у каждого факультета
+      fileName = subjectCfg.id === 'bioxim' ? resolveBioximTestsFile(resolveBioFacultyId(user))
+        : subjectCfg.id === 'hyg' ? resolveHygTestsFile(resolveBioFacultyId(user))
         : subjectCfg.testsFile;
       break;
     case 'glossary':  fileName = subjectCfg.glossaryFile;  break;

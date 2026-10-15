@@ -17,6 +17,7 @@
 import { BIO_QUESTIONS_PED_FILE, BIO_QUESTIONS_THERAPEUTIC_FILE } from '@/lib/bioQuestions';
 import { BIO_TASKS_PED_FILE, BIO_TASKS_STOM_FILE, BIO_TASKS_THERAPEUTIC_FILE, resolveBioFacultyId } from '@/lib/bioTasks';
 import { CHEM_TASKS_FILE, resolveChemFacultyId } from '@/lib/chemTasks';
+import { BIOXIM_TESTS_PED_FILE } from '@/lib/bioximTests';
 import { HYG_TESTS_PED_FILE, HYG_TESTS_STOM_FILE, HYG_TESTS_THERAPEUTIC_FILE } from '@/lib/hygTests';
 
 /** Название университета в шапке всех дисциплин */
@@ -570,6 +571,7 @@ export function getAllDataFileNames(): string[] {
   names.add(BIO_TASKS_PED_FILE);
   names.add(BIO_TASKS_THERAPEUTIC_FILE);
   names.add(CHEM_TASKS_FILE);
+  names.add(BIOXIM_TESTS_PED_FILE);
   names.add(HYG_TESTS_PED_FILE);
   names.add(HYG_TESTS_THERAPEUTIC_FILE);
   return [...names];

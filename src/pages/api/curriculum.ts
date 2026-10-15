@@ -22,6 +22,7 @@ import {
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
 import { loadDataFile } from '@/lib/dataFiles';
 import { attachLessonTestAnswers } from '@/lib/lessonTestAnswers';
+import { resolveBioximTestsFile } from '@/lib/bioximTests';
 import { canReadSubjectModule, userHasSubject } from '@/lib/subjectAccess';
 
 const redis = createRedisFromEnv();
@@ -132,7 +133,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // кому /api/subject-data отдал бы раздел «Тесты», остальным — только
       // признак, что ответы есть.
       let testAnswersLocked = false;
-      const testsFile = getSubject(program.subjectId)?.testsFile;
+      const testsFile = program.subjectId === 'bioxim'
+        ? resolveBioximTestsFile(program.facultyId)
+        : getSubject(program.subjectId)?.testsFile;
       if (tests?.length && testsFile) {
         const withAnswers = attachLessonTestAnswers(tests, await loadDataFile(testsFile));
         if (canReadSubjectModule(user, program.subjectId, 'tests', String(telegramId))) {

@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Сборка src/data/bioxim_tests.json из сборника тестов по биохимии КрасГМУ.
+"""Сборка банков тестов по биохимии из сборника КрасГМУ.
 
 Источник: «Биологическая химия: сборник тестовых заданий с эталонами ответов»
-(КрасГМУ, 2010, издание для лечебного дела) — темы по разделам, ключи ответов
-в конце документа. Банк общий для всех факультетов.
+(КрасГМУ, 2010) — темы по разделам, ключи ответов в конце документа.
+Издание для лечебного дела → src/data/bioxim_tests.json (общий банк),
+издание для педиатрии → src/data/bioxim_tests_pediatrics.json (банк педиатров,
+см. src/lib/bioximTests.ts). Издание определяется по титулу.
 
 Номера вопросов и вариантов в .doc — автонумерация Word, в XML их нет.
 Перед запуском открой .doc в Word и преврати нумерацию в текст, затем сохрани
@@ -16,8 +18,8 @@
 Запуск:
     python scripts/build_bioxim_tests.py path/to/bioxim_num.docx [--key-check other_num.docx]
 
---key-check — второй сборник (например, для педиатров): ключи одинаковых
-вопросов сверяются, расхождения печатаются.
+--key-check — другое издание: ключи одинаковых вопросов сверяются,
+расхождения печатаются.
 """
 from __future__ import annotations
 
@@ -28,9 +30,10 @@ import re
 import sys
 import zipfile
 from pathlib import Path
+from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
-DEST = ROOT / "src" / "data" / "bioxim_tests.json"
+DATA = ROOT / "src" / "data"
 
 SECTIONS = [
     "Ферменты",
@@ -45,14 +48,25 @@ SECTIONS = [
     "Биохимия органов и тканей",
 ]
 
-# Опечатки в ключе: (раздел, номер вопроса) → ответ. Ответ взят из того же
-# вопроса в сборнике для педиатров (--key-check).
-# Обратные расхождения (Белковый обмен 110, 113) — ошибка педиатрического
-# ключа, здесь ключ верный: остаток гликогенных аминокислот идёт в а, в, г;
-# тромбин действует на фибриноген.
-KEY_FIXES: dict[tuple[str, int], int] = {
-    ("Биологическое окисление", 19): 4,  # в ключе «42»; изоцитратдегидрогеназа
-    ("Витамины", 37): 4,                 # в ключе «1) Д»; антигеморрагический — К
+class Edition(NamedTuple):
+    name: str
+    dest: str
+    # Опечатки в ключе: (раздел, номер вопроса) → ответ. Ответ взят из того же
+    # вопроса в другом издании (--key-check) и сверен по смыслу.
+    key_fixes: dict[tuple[str, int], int]
+
+
+# Издание узнаём по коду специальности на титуле.
+EDITIONS = {
+    "060101": Edition("лечебное дело", "bioxim_tests.json", {
+        ("Биологическое окисление", 19): 4,  # в ключе «42»; изоцитратдегидрогеназа
+        ("Витамины", 37): 4,                 # в ключе «1) Д»; антигеморрагический — К
+    }),
+    # Педиатрия: тот же сборник плюс вопросы о детском возрасте.
+    "060103": Edition("педиатрия", "bioxim_tests_pediatrics.json", {
+        ("Белковый обмен", 110): 5,  # в ключе «а, б, г»; кетоновые тела — из кетогенных
+        ("Белковый обмен", 113): 1,  # в ключе «плазмин»; тромбин действует на фибриноген
+    }),
 }
 
 # Символы шрифта Symbol → Unicode
@@ -183,11 +197,15 @@ def parse_questions(section: str, lines: list[str], warn) -> list[dict]:
             cur["subs"].append(f"{m.group(1).replace('a', 'а')}) {clean_item(m.group(2))}")
         elif not opts and COMBO_RE.match(line):
             cur["combo"] = clean(line).rstrip(":") + ":"
+        elif opts and line[:1].isspace() and not SUB_RE.match(line):
+            # перенос внутри варианта: «…фенилаланина, полное» / « исключение тирозина»
+            opts[-1][1] += " " + line
         elif opts:
-            # Варианты в сборнике не переносятся на новый абзац: абзац без
-            # номера после вариантов — следующий вариант, номер потерян.
+            # Абзац без номера после вариантов — следующий вариант с потерянным
+            # номером: «снижение соотношения НАД\НАДН2» без «4)», «д) …» вместо «5)».
+            text = sub.group(2) if (sub := SUB_RE.match(line)) else line
             warn(f"{section} {cur['num']:03d}: вариант без номера {line.strip()!r} → {len(opts) + 1})")
-            opts.append([len(opts) + 1, line])
+            opts.append([len(opts) + 1, text])
         elif cur["subs"]:
             cur["subs"][-1] = clean_item(cur["subs"][-1] + " " + line)
         else:
@@ -230,8 +248,19 @@ def parse_key(lines: list[str], warn) -> dict[str, list[int]]:
     return key
 
 
-def build(docx: Path, warn, fixes: dict[tuple[str, int], int]) -> list[dict]:
-    bodies, key_lines = split_sections(read_paragraphs(docx))
+def detect_edition(paras: list[str]) -> Edition:
+    title = " ".join(paras[:40])
+    codes = [code for code in EDITIONS if code in title]
+    if len(codes) != 1:
+        raise SystemExit(f"не понял издание по титулу (коды специальности: {codes or 'нет'})")
+    return EDITIONS[codes[0]]
+
+
+def build(docx: Path, warn, apply_fixes: bool = True) -> tuple[Edition, list[dict]]:
+    paras = read_paragraphs(docx)
+    edition = detect_edition(paras)
+    fixes = edition.key_fixes if apply_fixes else {}
+    bodies, key_lines = split_sections(paras)
     key = parse_key(key_lines, warn)
     result = []
     for section in SECTIONS:
@@ -256,7 +285,7 @@ def build(docx: Path, warn, fixes: dict[tuple[str, int], int]) -> list[dict]:
                 "options": options,
                 "correct": correct,
             })
-    return result
+    return edition, result
 
 
 def norm(s: str) -> str:
@@ -300,11 +329,12 @@ def main() -> None:
     args = ap.parse_args()
 
     warnings: list[str] = []
-    tests = build(args.docx, warnings.append, KEY_FIXES)
+    edition, tests = build(args.docx, warnings.append)
+    print(f"издание: {edition.name}")
 
     if args.key_check:
         # Второй сборник — без правок ключа: сверяем исходные ключи
-        check_key(tests, build(args.key_check, lambda _w: None, {}))
+        check_key(tests, build(args.key_check, lambda _w: None, apply_fixes=False)[1])
 
     for w in warnings:
         print("WARN:", w)
@@ -315,8 +345,9 @@ def main() -> None:
         print(f"{n:4d}  {theme}")
     print(f"всего: {len(tests)}")
     if not args.dry_run:
-        DEST.write_text(json.dumps(tests, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        print(f"записано: {DEST.relative_to(ROOT)}")
+        dest = DATA / edition.dest
+        dest.write_text(json.dumps(tests, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"записано: {dest.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":

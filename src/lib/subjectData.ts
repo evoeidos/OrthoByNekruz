@@ -65,7 +65,7 @@ function cacheKey(subject: string, type: SubjectDataType): string {
     const faculty = readStoredFacultyId() || 'stomatology';
     return `https://cache.local/subject-data/${subject}/${type}/${faculty}`;
   }
-  if (subject === 'hyg' && type === 'tests') {
+  if ((subject === 'bioxim' || subject === 'hyg') && type === 'tests') {
     const faculty = readStoredFacultyId() || 'stomatology';
     return `https://cache.local/subject-data/${subject}/${type}/${faculty}`;
   }
