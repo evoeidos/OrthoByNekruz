@@ -10,6 +10,18 @@ import { AdminPatternLock } from '@/components/AdminPatternLock';
 import { adminPost, getTelegramInitData } from '@/lib/adminClient';
 import AdminGroupAccessTab from '@/components/AdminGroupAccessTab';
 import AdminCurriculumTab from '@/components/AdminCurriculumTab';
+import type { KrasgmuSessionStats } from '@/lib/krasgmu/sessionStats';
+
+/** 95 → «1 ч 35 мин», 3000 → «2 д 2 ч». */
+function formatMinutes(min: number | null): string {
+  if (min === null) return '—';
+  if (min < 60) return `${min} мин`;
+  const days = Math.floor(min / 1440);
+  const hours = Math.floor((min % 1440) / 60);
+  if (days > 0) return hours ? `${days} д ${hours} ч` : `${days} д`;
+  const rest = min % 60;
+  return rest ? `${hours} ч ${rest} мин` : `${hours} ч`;
+}
 
 interface User {
   tgId:          string;
@@ -1430,6 +1442,10 @@ export default function AdminPage() {
     nextRefreshAt: string;
   } | null>(null);
 
+  const [krasgmuSessionsExpanded, setKrasgmuSessionsExpanded] = useState(false);
+  const [krasgmuSessionsLoading, setKrasgmuSessionsLoading] = useState(false);
+  const [krasgmuSessions, setKrasgmuSessions] = useState<KrasgmuSessionStats | null>(null);
+
   const [previewCatalogExpanded, setPreviewCatalogExpanded] = useState(false);
   const [previewCatalog, setPreviewCatalog] = useState<PreviewCatalogSettings>({});
   const [previewCatalogBase, setPreviewCatalogBase] = useState<PreviewCatalogBaseEntry[]>([]);
@@ -1615,6 +1631,14 @@ export default function AdminPage() {
     const r = await api('/api/admin-faculty-stats', { force });
     setFacultyStatsLoading(false);
     if (r.ok && r.data.stats) setFacultyStats(r.data.stats);
+    else showToast(r.ok ? 'Ошибка загрузки статистики' : r.error);
+  }, [api, showToast]);
+
+  const fetchKrasgmuSessions = useCallback(async () => {
+    setKrasgmuSessionsLoading(true);
+    const r = await api('/api/admin-krasgmu-sessions');
+    setKrasgmuSessionsLoading(false);
+    if (r.ok && r.data.stats) setKrasgmuSessions(r.data.stats as KrasgmuSessionStats);
     else showToast(r.ok ? 'Ошибка загрузки статистики' : r.error);
   }, [api, showToast]);
 
@@ -2245,6 +2269,114 @@ export default function AdminPage() {
                     }}
                   >
                     {facultyStatsLoading ? '…' : '↻ Пересчитать сейчас'}
+                  </button>
+                </>
+              ) : (
+                <div style={{ textAlign: 'center', color: T.textFaint, fontSize: 13, padding: 12 }}>
+                  Не удалось загрузить
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* срок жизни сессии krasgmu.ru — сколько тратим входов Browserless */}
+        <div style={{
+          background: T.surface, border: `1px solid ${T.border}`,
+          borderRadius: 14, marginBottom: 14, overflow: 'hidden',
+        }}>
+          <button
+            type="button"
+            onClick={() => {
+              if (!krasgmuSessionsExpanded && !krasgmuSessions) void fetchKrasgmuSessions();
+              setKrasgmuSessionsExpanded(v => !v);
+            }}
+            style={{
+              width: '100%', padding: '13px 14px', border: 'none', background: 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+              cursor: 'pointer', fontFamily: FONT_SANS, textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 10, background: T.accentSoft,
+                color: T.accent, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 18, flexShrink: 0,
+              }}>⏱</div>
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: T.text }}>
+                  Сессии КрасГМУ
+                </div>
+                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>
+                  Через сколько умирает вход на krasgmu.ru · за 30 дней
+                </div>
+              </div>
+            </div>
+            <span style={{
+              color: T.textFaint, fontSize: 14,
+              transform: krasgmuSessionsExpanded ? 'rotate(180deg)' : 'none',
+              transition: 'transform 0.2s', display: 'inline-block',
+            }}>▾</span>
+          </button>
+
+          {krasgmuSessionsExpanded && (
+            <div style={{ borderTop: `1px solid ${T.border}`, background: T.surfaceAlt, padding: '14px' }}>
+              {krasgmuSessionsLoading && !krasgmuSessions ? (
+                <div style={{ textAlign: 'center', color: T.textFaint, fontSize: 13, padding: 12 }}>
+                  Загружаем…
+                </div>
+              ) : krasgmuSessions && krasgmuSessions.count === 0 ? (
+                <div style={{ textAlign: 'center', color: T.textFaint, fontSize: 13, padding: 12 }}>
+                  Пока ни одна сессия не истекла
+                </div>
+              ) : krasgmuSessions ? (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+                    {([
+                      { label: 'Живёт минимум', value: krasgmuSessions.maxAliveMin },
+                      { label: 'Ранняя смерть', value: krasgmuSessions.minDeadByMin },
+                      { label: 'Мин. простой', value: krasgmuSessions.minIdleMin },
+                    ] as const).map(row => (
+                      <div
+                        key={row.label}
+                        style={{
+                          padding: '10px 12px', borderRadius: 10,
+                          background: T.surface, border: `1px solid ${T.border}`,
+                        }}
+                      >
+                        <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4 }}>{row.label}</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>
+                          {formatMinutes(row.value)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 11, color: T.textFaint, lineHeight: 1.5, marginBottom: 10 }}>
+                    Истекло сессий: <strong style={{ color: T.text }}>{krasgmuSessions.count}</strong>.
+                    Каждая строка: жила не меньше → умерла не позже · простой перед смертью.
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
+                    {krasgmuSessions.recent.map(e => (
+                      <div key={e.at} style={{ fontSize: 11.5, color: T.textMuted, fontVariantNumeric: 'tabular-nums' }}>
+                        {new Date(e.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        {' — '}
+                        {formatMinutes(e.aliveMin)} → {formatMinutes(e.deadByMin)} · простой {formatMinutes(e.idleMin)}
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void fetchKrasgmuSessions()}
+                    disabled={krasgmuSessionsLoading}
+                    style={{
+                      height: 34, padding: '0 12px', borderRadius: 8,
+                      border: `1px solid ${T.border}`, background: T.surface,
+                      color: T.textMuted, fontSize: 12, fontWeight: 600,
+                      cursor: krasgmuSessionsLoading ? 'default' : 'pointer',
+                      opacity: krasgmuSessionsLoading ? 0.6 : 1,
+                    }}
+                  >
+                    {krasgmuSessionsLoading ? '…' : '↻ Обновить'}
                   </button>
                 </>
               ) : (
