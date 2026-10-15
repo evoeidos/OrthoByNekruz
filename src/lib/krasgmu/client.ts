@@ -155,6 +155,10 @@ export async function fetchKrasgmuBinary(
   return { buffer, contentType };
 }
 
+/**
+ * false — сессия истекла и нужен перелогин. Сетевой сбой пробрасывается: из-за
+ * лежащего krasgmu.ru не стоит тратить вход через Browserless.
+ */
 export async function validateSession(
   cookies: KrasgmuSessionCookies,
   login: string,
@@ -164,7 +168,8 @@ export async function validateSession(
     const id = deriveStudentId(login);
     await fetchKrasgmuPage(`/index.php?page%5Bcommon%5D=user&id=${id}&cat=student&what=mark`, cookies);
     return true;
-  } catch {
-    return false;
+  } catch (e) {
+    if (e instanceof KrasgmuAuthError && e.code === 'invalid_credentials') return false;
+    throw e;
   }
 }

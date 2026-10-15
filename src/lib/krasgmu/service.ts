@@ -41,6 +41,7 @@ import type {
 } from '@/lib/krasgmu/types';
 import { findActiveCycle, krasnoyarskNow } from '@/lib/uniHelpers';
 import { reserveBrowserLogin, withReloginLock } from '@/lib/krasgmu/loginGuard';
+import { recordSessionDeath } from '@/lib/krasgmu/sessionStats';
 
 // Личный кабинет живёт на page[common]=user (не page[org]=dean — та страница
 // чисто информационная и не персонализируется). id — цифры из логина ('z93339' -> '93339').
@@ -81,6 +82,9 @@ export async function ensureKrasgmuSession(
   if (valid) {
     await touchValidated(redis, tgId);
     return { cookies, login: binding.universityLogin };
+  }
+  if (cookies['krasgmu.auth']) {
+    await recordSessionDeath(redis, binding).catch(e => console.error('[krasgmu] session stats', e));
   }
 
   const login = binding.universityLogin;
