@@ -588,9 +588,15 @@ const renderWithGlossary = (text: string, relatedTerms?: string[], isNested: boo
       {text.split('\n').map((line, lineIdx) => {
         if (line.trim() === '') return <div key={lineIdx} className="h-1" />;
 
+        // Пункт списка («- », «• », «1. ») — маркер слева, как в ExamScreen и RichText.
+        const listMatch = line.match(/^(\s*[•\-*]\s+|\s*\d+\.\s+)/);
+        let listMarker = listMatch ? listMatch[1].trim() : '';
+        if (listMarker === '-' || listMarker === '*') listMarker = '•';
+        const cleanLine = listMatch ? line.slice(listMatch[0].length) : line;
+
         const chars: { ch: string; bold: boolean; italic: boolean }[] = [];
         let bold = false, italic = false;
-        for (const tk of line.split(/(\*\*|_)/g)) {
+        for (const tk of cleanLine.split(/(\*\*|_)/g)) {
           if (tk === '**') { bold = !bold; continue; }
           if (tk === '_')  { italic = !italic; continue; }
           for (const ch of tk) chars.push({ ch, bold, italic });
@@ -635,15 +641,35 @@ const renderWithGlossary = (text: string, relatedTerms?: string[], isNested: boo
         }
         accepted.sort((a, b) => a.start - b.start);
 
+        // Режем строку на куски по границам жирного/курсива и терминов глоссария,
+        // чтобы у каждого куска было одно оформление.
+        const boundary = new Set<number>([0, plain.length]);
+        for (let i = 1; i < chars.length; i++) {
+          if (chars[i].bold !== chars[i - 1].bold || chars[i].italic !== chars[i - 1].italic) boundary.add(i);
+        }
+        for (const h of accepted) { boundary.add(h.start); boundary.add(h.end); }
+        const bounds = [...boundary].sort((a, b) => a - b);
+
         const segs: React.ReactNode[] = [];
-        let last = 0;
-        accepted.forEach((h, i) => {
-          if (h.start > last) segs.push(<span key={last}>{plain.slice(last, h.start)}</span>);
+        for (let bi = 0; bi < bounds.length - 1; bi++) {
+          const s = bounds[bi], e = bounds[bi + 1];
+          if (s >= e) continue;
+          const fmt = chars[s];
+          const style: React.CSSProperties = {
+            fontWeight: fmt.bold ? 700 : 'inherit',
+            color: fmt.bold ? 'var(--c-text)' : 'inherit',
+            fontStyle: fmt.italic ? 'italic' : 'normal',
+          };
+          const h = accepted.find(a => s >= a.start && e <= a.end);
+          if (!h) {
+            segs.push(<span key={s} style={style}>{plain.slice(s, e)}</span>);
+            continue;
+          }
           segs.push(
             <span
-              key={h.start}
+              key={s}
               className="border-b border-dashed border-current transition-opacity active:opacity-70"
-              style={{ cursor: 'pointer', color: 'var(--c-glossary, var(--c-primary))' }}
+              style={{ ...style, cursor: 'pointer', color: 'var(--c-glossary, var(--c-primary))' }}
               onClick={(ev) => {
                 ev.stopPropagation();
                 const termKey = h.item.term;
@@ -660,13 +686,21 @@ const renderWithGlossary = (text: string, relatedTerms?: string[], isNested: boo
                 }
               }}
             >
-              {plain.slice(h.start, h.end)}
+              {plain.slice(s, e)}
             </span>
           );
-          last = h.end;
-        });
-        if (last < plain.length) segs.push(<span key={last}>{plain.slice(last)}</span>);
+        }
 
+        if (listMatch) {
+          // Пункт с отступом в исходнике («  - …») — вложенный: сдвигаем правее родителя.
+          const nested = /^\s{2,}/.test(line);
+          return (
+            <div key={lineIdx} className={`flex gap-2 mb-1.5 mt-1 ${nested ? 'pl-6' : 'pl-2'}`}>
+              <span className="text-[14px] leading-snug font-bold" style={{ color: accentColor }}>{listMarker}</span>
+              <p className="m-0 flex-1 leading-snug">{segs}</p>
+            </div>
+          );
+        }
         return <p key={lineIdx} className="indent-4 mb-2 mt-1 last:mb-0">{segs}</p>;
       })}
     </div>
