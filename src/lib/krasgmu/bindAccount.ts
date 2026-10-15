@@ -30,8 +30,7 @@ export async function bindUniversityAccount(
 
   try {
     await checkBindRateLimit(redis, tgId);
-    await reserveBrowserLogin(redis);
-    const cookies = await loginKrasgmu(loginStr, passStr);
+    const cookies = await loginKrasgmu(loginStr, passStr, () => reserveBrowserLogin(redis));
     await saveBinding(redis, tgId, loginStr, passStr, cookies);
     // Иначе до 5 минут после переподключения к другому аккаунту могут отдаваться
     // расписание/оценки/профиль предыдущего.

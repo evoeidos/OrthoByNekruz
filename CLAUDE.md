@@ -47,9 +47,10 @@ Push в `main` сразу деплоится на Timeweb App Platform (`npm run
 - **Сбои** — `alertAdmin(kind, title, detail)` из `src/lib/alertAdmin.ts`
   (сообщение админу в Telegram, не чаще раза в 15 мин на kind).
   `/api/health` — для внешнего мониторинга.
-- **Вход на krasgmu.ru** идёт через Browserless (бесплатный тариф, 1000 units
-  в месяц): лимиты и одна попытка перелогина на студента —
-  `src/lib/krasgmu/loginGuard.ts`.
+- **Вход на krasgmu.ru** — обычный HTTP-запрос (`loginKrasgmu` в
+  `src/lib/krasgmu/client.ts`, редиректы вручную, иначе теряется cookie).
+  Browserless (бесплатный тариф, 1000 units в месяц) — только запасной путь;
+  лимиты и одна попытка перелогина на студента — `src/lib/krasgmu/loginGuard.ts`.
 
 ## Контент
 

@@ -92,9 +92,8 @@ export async function ensureKrasgmuSession(
     redis,
     tgId,
     async () => {
-      await reserveBrowserLogin(redis);
       const password = loadPassword(binding);
-      const fresh = await loginKrasgmu(login, password);
+      const fresh = await loginKrasgmu(login, password, () => reserveBrowserLogin(redis));
       await saveBinding(redis, tgId, login, password, fresh);
       return { cookies: fresh, login };
     },

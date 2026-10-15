@@ -2,9 +2,9 @@ import type { AppRedis } from '@/lib/redis';
 import { KrasgmuAuthError } from '@/lib/krasgmu/errors';
 import { alertAdmin } from '@/lib/alertAdmin';
 
-// Каждый вход на krasgmu.ru — сессия удалённого браузера Browserless.
-// Бесплатный тариф: 1000 units в месяц, при исчерпании запросы отклоняются,
-// и расписание/оценки/методички пропадают у всех до сброса квоты.
+// Вход на krasgmu.ru идёт обычным HTTP-запросом; удалённый браузер Browserless —
+// только запасной путь, если HTTP-вход перестал выдавать cookie. Его бесплатный
+// тариф: 1000 units в месяц, при исчерпании запросы отклоняются.
 
 /** Попыток привязки на пользователя в час — защита от перебора паролей через нас. */
 const BIND_ATTEMPTS_PER_HOUR = 5;

@@ -1,5 +1,6 @@
 import { loginKrasgmuViaBrowser } from '@/lib/krasgmu/browserLogin';
 import { KrasgmuAuthError } from '@/lib/krasgmu/errors';
+import { alertAdmin } from '@/lib/alertAdmin';
 import type { KrasgmuSessionCookies } from '@/lib/krasgmu/types';
 
 export { KrasgmuAuthError } from '@/lib/krasgmu/errors';
@@ -26,7 +27,8 @@ function applySetCookie(res: Response, jar: KrasgmuSessionCookies): void {
     if (eq && eq > 0) {
       const name = seg!.slice(0, eq).trim();
       const val = seg!.slice(eq + 1).trim();
-      if (name && val) jar[name] = val;
+      if (name && val && val !== 'deleted') jar[name] = val;
+      else if (name) delete jar[name];
     }
   }
 }
@@ -109,17 +111,101 @@ function isAccessDeniedPage(html: string): boolean {
 }
 
 /**
- * Авторизация на krasgmu.ru.
- * Сайт за DDoS-Guard: обычный fetch()-POST на форму логина принимается с кодом 200,
- * но не выдаёт cookie 'krasgmu.auth' — TLS/HTTP-отпечаток Node не проходит проверку
- * бэкенда для чувствительного действия (подтверждено побайтовым сравнением с DevTools).
- * Поэтому сам вход выполняется через headless-браузер (browserLogin.ts); дальше все
- * страницы (расписание, оценки) читаются обычным fetch() — эти GET DDoS-Guard пропускает.
+ * Запрос, который проходит редиректы сам и собирает cookie с каждого ответа.
+ * При redirect: 'follow' fetch отдаёт только последний ответ, и cookie,
+ * выставленные на промежуточном 302 (так приходит krasgmu.auth после входа), теряются.
+ */
+async function fetchCollectingCookies(
+  url: string,
+  jar: KrasgmuSessionCookies,
+  init: { method?: 'GET' | 'POST'; body?: string; referer?: string } = {},
+): Promise<FetchResult> {
+  let current = url;
+  let method = init.method ?? 'GET';
+  let body = init.body;
+  for (let hop = 0; hop < 8; hop++) {
+    const headers = new Headers(browserLikeHeaders());
+    headers.set('User-Agent', UA);
+    if (init.referer) headers.set('Referer', init.referer);
+    else headers.set('sec-fetch-site', 'none');
+    if (method === 'POST') {
+      headers.set('Origin', BASE);
+      headers.set('Content-Type', 'application/x-www-form-urlencoded');
+    }
+    const ck = cookieHeader(jar);
+    if (ck) headers.set('Cookie', ck);
+
+    const res = await fetch(current, { method, headers, body, redirect: 'manual' });
+    applySetCookie(res, jar);
+
+    const location = res.headers.get('location');
+    if (res.status >= 300 && res.status < 400 && location) {
+      current = new URL(location, current).toString();
+      if (res.status !== 307 && res.status !== 308) {
+        method = 'GET';
+        body = undefined;
+      }
+      continue;
+    }
+    return { body: await res.text(), status: res.status, url: current };
+  }
+  throw new KrasgmuAuthError('Сайт КрасГМУ зациклил редиректы при входе', 'form_changed');
+}
+
+/**
+ * Вход обычным HTTP-запросом через форму главной страницы: POST на корень сайта
+ * с полями login (скрытое, равно логину), user_name и user_pass.
+ * null — cookie не выдан без понятной причины (сайт изменился или DDoS-Guard
+ * не пустил), тогда вызывающий пробует браузер.
+ */
+async function loginKrasgmuViaHttp(
+  login: string,
+  password: string,
+): Promise<KrasgmuSessionCookies | null> {
+  const jar: KrasgmuSessionCookies = {};
+  const home = `${BASE}/`;
+  try {
+    await fetchCollectingCookies(home, jar);
+    const res = await fetchCollectingCookies(home, jar, {
+      method: 'POST',
+      body: new URLSearchParams({ login, user_name: login, user_pass: password }).toString(),
+      referer: home,
+    });
+    if (isLoginFailurePage(res.body)) {
+      throw new KrasgmuAuthError('Неверный логин или пароль', 'invalid_credentials');
+    }
+  } catch (e) {
+    if (e instanceof KrasgmuAuthError) throw e;
+    throw new KrasgmuAuthError(
+      `Сеть недоступна: ${e instanceof Error ? e.message : 'unknown'}`,
+      'network',
+    );
+  }
+  return jar['krasgmu.auth'] ? jar : null;
+}
+
+/**
+ * Авторизация на krasgmu.ru. Основной путь — обычный HTTP-запрос (около секунды,
+ * без лимитов). Сайт за DDoS-Guard, поэтому если вход перестанет выдавать cookie,
+ * остаётся запасной путь через Browserless (browserLogin.ts): beforeBrowser
+ * резервирует вход из его суточного лимита. Дальше все страницы (расписание,
+ * оценки) читаются обычным fetch().
  */
 export async function loginKrasgmu(
   login: string,
   password: string,
+  beforeBrowser: () => Promise<void>,
 ): Promise<KrasgmuSessionCookies> {
+  const jar = await loginKrasgmuViaHttp(login, password);
+  if (jar) return jar;
+
+  console.error('[krasgmu] HTTP login gave no krasgmu.auth cookie — falling back to Browserless');
+  alertAdmin(
+    'krasgmu:http-login',
+    'КрасГМУ: вход без браузера перестал выдавать cookie',
+    'Входы идут через Browserless (30 в сутки). Сайт или DDoS-Guard что-то поменял — нужно разобраться.',
+  );
+  await beforeBrowser();
   return loginKrasgmuViaBrowser(login, password);
 }
 
