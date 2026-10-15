@@ -61,6 +61,8 @@ export type AnnotationBlock =
 export interface LessonTest {
   question: string;
   options: string[];
+  /** Только в ответе API: номер правильного варианта из банка тестов предмета */
+  answer?: number;
 }
 
 export interface Lesson {
@@ -94,6 +96,8 @@ export interface Lesson {
   questions?: string[];
   /** Тестовые задания из методички — для самопроверки */
   tests?: LessonTest[];
+  /** Только в ответе API: ответы к тестам есть, но раздел «Тесты» предмета не открыт */
+  testAnswersLocked?: boolean;
   /** Только в ответе API: у занятия есть аннотация/вопросы/тесты, текст грузится отдельно */
   hasContent?: boolean;
   /** Только в ответе API: сколько вопросов и тестов, чтобы показать в списке до загрузки текста */

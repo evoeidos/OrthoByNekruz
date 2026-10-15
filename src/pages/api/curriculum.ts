@@ -20,16 +20,9 @@ import {
   programsForGroup,
 } from '@/lib/curriculum';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
-
-function userHasSubject(user: Record<string, unknown>, subjectId: string): boolean {
-  const subjects = user.subjects;
-  if (subjects && typeof subjects === 'object') {
-    return (subjects as Record<string, unknown>)[subjectId] === true;
-  }
-  if (subjectId === 'ortho') return !!user.activatedKey;
-  if (subjectId === 'micro') return user.micro === true;
-  return false;
-}
+import { loadDataFile } from '@/lib/dataFiles';
+import { attachLessonTestAnswers } from '@/lib/lessonTestAnswers';
+import { canReadSubjectModule, userHasSubject } from '@/lib/subjectAccess';
 
 const redis = createRedisFromEnv();
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
@@ -130,10 +123,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Аннотация, вопросы и тесты занимают сотни килобайт на предмет, поэтому
     // список занятий отдаётся без них, а текст одного занятия приходит по запросу.
     if (typeof programId === 'string' && typeof lessonId === 'string') {
-      const lesson = visible.find(p => p.id === programId)?.lessons.find(l => l.id === lessonId);
-      if (!lesson) return res.status(404).json({ error: 'Занятие не найдено.' });
-      const { annotation, images, questions, tests } = lesson;
-      return res.status(200).json({ ok: true, content: { annotation, images, questions, tests } });
+      const program = visible.find(p => p.id === programId);
+      const lesson = program?.lessons.find(l => l.id === lessonId);
+      if (!program || !lesson) return res.status(404).json({ error: 'Занятие не найдено.' });
+      const { annotation, images, questions } = lesson;
+      let { tests } = lesson;
+      // Ответы берём из банка тестов предмета, а он платный: отдаём их тем,
+      // кому /api/subject-data отдал бы раздел «Тесты», остальным — только
+      // признак, что ответы есть.
+      let testAnswersLocked = false;
+      const testsFile = getSubject(program.subjectId)?.testsFile;
+      if (tests?.length && testsFile) {
+        const withAnswers = attachLessonTestAnswers(tests, await loadDataFile(testsFile));
+        if (canReadSubjectModule(user, program.subjectId, 'tests', String(telegramId))) {
+          tests = withAnswers;
+        } else {
+          testAnswersLocked = withAnswers.some(t => t.answer !== undefined);
+        }
+      }
+      return res.status(200).json({
+        ok: true,
+        content: { annotation, images, questions, tests, ...(testAnswersLocked ? { testAnswersLocked } : {}) },
+      });
     }
 
     const programs = visible.sort((a, b) => {
