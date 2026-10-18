@@ -128,11 +128,22 @@ export function numericGrade(g: string): number | null {
   return Number.isFinite(n) && n >= 2 && n <= 5 ? n : null;
 }
 
+/** Оценка (в т.ч. дробная) → 5/4/3/2 по тем же порогам, что и цвет: «4,5» считается пятёркой. */
+export function gradeBucket(n: number): 5 | 4 | 3 | 2 {
+  if (n >= 4.5) return 5;
+  if (n >= 3.5) return 4;
+  if (n >= 2.5) return 3;
+  return 2;
+}
+
+/** bg/fg — плашка с цифрой, solid — заливка шкал и кольца. */
 export function gradeColors(n: number) {
-  if (n >= 4.5) return { bg: 'var(--c-primary-soft)', fg: 'var(--c-primary-strong)' };
-  if (n >= 3.5) return { bg: 'var(--c-info-soft)', fg: 'var(--c-info)' };
-  if (n >= 2.5) return { bg: 'var(--c-amber-soft)', fg: 'var(--c-amber)' };
-  return { bg: 'var(--c-danger-soft)', fg: 'var(--c-danger)' };
+  switch (gradeBucket(n)) {
+    case 5: return { bg: 'var(--c-primary-soft)', fg: 'var(--c-primary-strong)', solid: 'var(--c-primary)' };
+    case 4: return { bg: 'var(--c-info-soft)', fg: 'var(--c-info)', solid: 'var(--c-info)' };
+    case 3: return { bg: 'var(--c-amber-soft)', fg: 'var(--c-amber)', solid: 'var(--c-amber)' };
+    default: return { bg: 'var(--c-danger-soft)', fg: 'var(--c-danger)', solid: 'var(--c-danger)' };
+  }
 }
 
 export function subjectBase(s: string): string {
