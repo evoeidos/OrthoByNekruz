@@ -1,14 +1,20 @@
 import { createHash } from 'crypto';
+import type { AppRedis } from '@/lib/redis';
 import type { UniversityMethodichka } from '@/lib/universityParser';
 
 // Одним вызовом DeepSeek укладываемся в таймаут (25 с), поэтому нарезка на части не подходит.
 const MAX_TEXT_CHARS = 30_000;
-// Меняйте при изменении промпта: версия входит в ключ кэша, старые конспекты перестанут отдаваться.
-export const METHODICHKA_PROMPT_VERSION = 'v2';
+// Меняйте при изменении промпта: версия входит в ключ, сохранённые конспекты создадутся заново.
+export const METHODICHKA_PROMPT_VERSION = 'v3';
 
 const MAX_CONTEXT_FIELD_CHARS = 300;
 
-export type MethodichkaAiContext = { discipline?: string; topic?: string };
+export type MethodichkaAiContext = {
+  discipline?: string;
+  topic?: string;
+  /** Название факультета студента: «Стоматологический факультет» */
+  faculty?: string;
+};
 
 const SYSTEM_INSTRUCTION = `Ты — преподаватель-клиницист, который готовит студентов медицинского университета к занятиям и экзаменам.
 Тебе дают дисциплину, тему занятия и методические указания к ней. Методичка — основной источник и имеет приоритет
@@ -26,6 +32,9 @@ const SYSTEM_INSTRUCTION = `Ты — преподаватель-клиницис
   чтобы студент видел, что это стоит перепроверить и это не то, что спросят по методичке дословно
 - Не выдумывай и не искажай специфичные для методички данные (цифры, классификации, протоколы из её текста)
 - Пиши коротко и по делу, без вступлений и заключений вроде «надеюсь, помогло»
+- Если указан факультет, подбирай клинические примеры и акценты под эту специальность
+  (стоматологу — полость рта и челюстно-лицевая область, педиатру — детский возраст),
+  но не выбрасывай из методички то, что к специальности не относится
 
 СТРУКТУРА ОТВЕТА:
 ## Суть темы
@@ -59,7 +68,12 @@ function clampField(s: string | undefined): string {
 export function buildMethodichkaPrompts(m: UniversityMethodichka, context: MethodichkaAiContext = {}) {
   const discipline = clampField(context.discipline);
   const topic = clampField(context.topic);
-  const header = [discipline && `Дисциплина: ${discipline}`, topic && `Тема занятия: ${topic}`]
+  const faculty = clampField(context.faculty);
+  const header = [
+    faculty && `Факультет: ${faculty}`,
+    discipline && `Дисциплина: ${discipline}`,
+    topic && `Тема занятия: ${topic}`,
+  ]
     .filter(Boolean)
     .join('\n');
 
@@ -69,10 +83,50 @@ export function buildMethodichkaPrompts(m: UniversityMethodichka, context: Metho
   };
 }
 
-// Хэш текста + контекста в ключе: если преподаватель поправил методичку или
-// пришёл другой заголовок темы/дисциплины, конспект пересоздаётся заново.
-export function methodichkaCacheKey(tlId: string, m: UniversityMethodichka, context: MethodichkaAiContext = {}): string {
-  const raw = `${methodichkaToPlainText(m)}\n${clampField(context.discipline)}\n${clampField(context.topic)}`;
-  const hash = createHash('sha256').update(raw).digest('hex').slice(0, 16);
-  return `ai:methodichka:${METHODICHKA_PROMPT_VERSION}:${tlId}:${hash}`;
+// ─── Сохранённый конспект ──────────────────────────────────────────────────
+//
+// Конспект делается один раз на методичку и факультет и дальше отдаётся всем
+// студентам этого факультета, которые её откроют, — из «Библиотеки» или из
+// «Расписания». Факультет — свой у каждого конспекта: ИИ подбирает акценты
+// под специальность, и стоматолог не должен получить разбор для педиатров.
+// Раньше в ключ входили дисциплина и тема от клиента, а вкладки называют их
+// по-разному, и одна методичка генерировалась заново. Хранится бессрочно;
+// если преподаватель поменял текст методички, хэш не совпадёт и конспект
+// пересоздастся.
+
+export type StoredMethodichkaAi = { hash: string; result: string; createdAt: string };
+
+/** facultyId — 'stomatology' | 'therapeutic' | 'pediatrics' или 'general', если факультет неизвестен. */
+export const methodichkaAiKey = (tlId: string, facultyId: string) =>
+  `ai:methodichka:${METHODICHKA_PROMPT_VERSION}:${facultyId}:${tlId}`;
+
+/** Пока один запрос генерирует конспект, остальные ждут его, а не запускают свой. */
+export const methodichkaAiLockKey = (tlId: string, facultyId: string) =>
+  `ai:methodichka:gen:${facultyId}:${tlId}`;
+
+export function methodichkaTextHash(m: UniversityMethodichka): string {
+  return createHash('sha256').update(methodichkaToPlainText(m)).digest('hex').slice(0, 16);
+}
+
+export async function loadStoredMethodichkaAi(
+  redis: AppRedis,
+  tlId: string,
+  facultyId: string,
+): Promise<StoredMethodichkaAi | null> {
+  const raw = await redis.get<unknown>(methodichkaAiKey(tlId, facultyId));
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Partial<StoredMethodichkaAi>;
+  if (typeof r.hash !== 'string' || typeof r.result !== 'string' || !r.result) return null;
+  return { hash: r.hash, result: r.result, createdAt: String(r.createdAt ?? '') };
+}
+
+export async function saveMethodichkaAi(
+  redis: AppRedis,
+  tlId: string,
+  facultyId: string,
+  hash: string,
+  result: string,
+): Promise<void> {
+  const record: StoredMethodichkaAi = { hash, result, createdAt: new Date().toISOString() };
+  await redis.set(methodichkaAiKey(tlId, facultyId), record);
 }

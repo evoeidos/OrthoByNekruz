@@ -1,14 +1,21 @@
 import { NextResponse } from 'next/server';
 import { friendlyAiError, generateQuestionAiAnswer } from '@/lib/questionAi';
-import { buildMethodichkaPrompts, methodichkaCacheKey } from '@/lib/methodichkaAi';
+import {
+  buildMethodichkaPrompts,
+  loadStoredMethodichkaAi,
+  methodichkaAiLockKey,
+  methodichkaTextHash,
+  saveMethodichkaAi,
+} from '@/lib/methodichkaAi';
 import { verifyApiStudyUser } from '@/lib/apiUserAuth';
 import { createRedisFromEnv } from '@/lib/redis';
 import { checkAiRateLimit } from '@/lib/aiRateLimit';
 import { alertAdmin } from '@/lib/alertAdmin';
 import { fetchUniversityMethodichka } from '@/lib/universityParser';
+import { getFacultyPromoById } from '@/lib/facultyCodes';
+import { facultyFromStudyGroup } from '@/lib/studyGroup';
 
 const redis = createRedisFromEnv();
-const AI_CACHE_TTL_SEC = 60 * 60 * 24 * 30;
 
 // Конспект — длинный разбор по пяти разделам из методички до 30 000 символов.
 // DeepSeek сначала рассуждает, и лимита в 2000 токенов вопросов ему не
@@ -18,6 +25,34 @@ const METHODICHKA_AI_LIMITS = {
   timewebTimeoutMs: 90_000,
   totalBudgetMs: 110_000,
 };
+
+// Блокировка генерации живёт чуть дольше бюджета ИИ; ждущие проверяют,
+// не появился ли конспект, раз в пару секунд.
+const GENERATE_LOCK_SEC = 150;
+const WAIT_FOR_OTHER_MS = 120_000;
+const WAIT_POLL_MS = 2_000;
+
+/** Факультет студента из профиля, а не от клиента; по группе, если не выбран. */
+function resolveStudentFaculty(user: Record<string, unknown>): { id: string; label?: string } {
+  const id = String(user.facultyId || '').trim()
+    || facultyFromStudyGroup(String(user.studyGroup || ''))
+    || '';
+  const promo = id ? getFacultyPromoById(id) : null;
+  return promo ? { id: promo.id, label: promo.facultyLabel } : { id: 'general' };
+}
+
+/** Конспект, который сейчас делает другой запрос, — или null, если не дождались. */
+async function waitForOtherGeneration(tlId: string, facultyId: string, hash: string): Promise<string | null> {
+  const deadline = Date.now() + WAIT_FOR_OTHER_MS;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, WAIT_POLL_MS));
+    const stored = await loadStoredMethodichkaAi(redis, tlId, facultyId);
+    if (stored?.hash === hash) return stored.result;
+    // Тот запрос закончился без результата — генерировать самим.
+    if (!(await redis.exists(methodichkaAiLockKey(tlId, facultyId)))) return null;
+  }
+  return null;
+}
 
 export async function POST(req: Request) {
   let body: { tlId?: string; initData?: string; telegramId?: string; discipline?: string; topic?: string };
@@ -40,41 +75,70 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { methodichka } = await fetchUniversityMethodichka(redis, auth.tgId, tlId);
+    // Готовый конспект своего факультета не тратит ни токены, ни лимит запросов.
+    const faculty = resolveStudentFaculty(auth.user);
+    const stored = await loadStoredMethodichkaAi(redis, tlId, faculty.id);
+
+    let methodichka;
+    try {
+      ({ methodichka } = await fetchUniversityMethodichka(redis, auth.tgId, tlId));
+    } catch (e) {
+      // Сайт вуза недоступен — отдаём сохранённый конспект, если он есть.
+      if (stored) return NextResponse.json({ result: stored.result });
+      throw e;
+    }
     if (!methodichka) {
+      if (stored) return NextResponse.json({ result: stored.result });
       return NextResponse.json({ error: 'Методичка не найдена' }, { status: 404 });
     }
 
-    const context = { discipline: body.discipline, topic: body.topic };
-
-    // Попадание в кэш не тратит ни токены, ни лимит запросов.
-    const cacheKey = methodichkaCacheKey(tlId, methodichka, context);
-    const cached = await redis.get<string>(cacheKey);
-    if (cached) {
-      return NextResponse.json({ result: cached });
+    const hash = methodichkaTextHash(methodichka);
+    if (stored?.hash === hash) {
+      return NextResponse.json({ result: stored.result });
     }
 
-    const limit = await checkAiRateLimit(redis, auth.tgId);
-    if (!limit.allowed) {
+    // Первым конспект делает тот, кто взял блокировку; остальные ждут его.
+    const lockKey = methodichkaAiLockKey(tlId, faculty.id);
+    const locked = await redis.set(lockKey, auth.tgId, { ex: GENERATE_LOCK_SEC, nx: true });
+    if (locked === null) {
+      const ready = await waitForOtherGeneration(tlId, faculty.id, hash);
+      if (ready) return NextResponse.json({ result: ready });
       return NextResponse.json(
-        { error: limit.error },
-        { status: 429, headers: { 'Retry-After': String(limit.retryAfterSec) } },
+        { error: 'Конспект ещё готовится — попробуй через минуту.' },
+        { status: 503 },
       );
     }
 
-    const { systemInstruction, userPrompt } = buildMethodichkaPrompts(methodichka, context);
-    const out = await generateQuestionAiAnswer(systemInstruction, userPrompt, METHODICHKA_AI_LIMITS);
-    if (out.result) {
-      // Обрезанный конспект отдаём, но не кэшируем на месяц — в следующий раз
-      // попробуем получить полный.
-      if (!out.truncated) await redis.set(cacheKey, out.result, { ex: AI_CACHE_TTL_SEC });
-      return NextResponse.json({ result: out.result });
+    try {
+      const limit = await checkAiRateLimit(redis, auth.tgId);
+      if (!limit.allowed) {
+        return NextResponse.json(
+          { error: limit.error },
+          { status: 429, headers: { 'Retry-After': String(limit.retryAfterSec) } },
+        );
+      }
+
+      const context = { discipline: body.discipline, topic: body.topic, faculty: faculty.label };
+      const { systemInstruction, userPrompt } = buildMethodichkaPrompts(methodichka, context);
+      const out = await generateQuestionAiAnswer(systemInstruction, userPrompt, METHODICHKA_AI_LIMITS);
+      if (out.result) {
+        // Обрезанный конспект отдаём, но не сохраняем — в следующий раз
+        // попробуем получить полный.
+        if (!out.truncated) await saveMethodichkaAi(redis, tlId, faculty.id, hash, out.result);
+        return NextResponse.json({ result: out.result });
+      }
+      alertAdmin('ai:methodichka', 'ИИ: не удалось сделать конспект методички', out.detail ?? out.error);
+      return NextResponse.json(
+        { error: friendlyAiError(out.error || 'Не удалось получить ответ') },
+        { status: 503 },
+      );
+    } finally {
+      // Снимаем только свою блокировку (не истёкшую и не перехваченную).
+      // String(): Redis-обёртка отдаёт строку из цифр (Telegram ID) числом.
+      if (String(await redis.get(lockKey).catch(() => null)) === String(auth.tgId)) {
+        await redis.del(lockKey).catch(() => 0);
+      }
     }
-    alertAdmin('ai:methodichka', 'ИИ: не удалось сделать конспект методички', out.detail ?? out.error);
-    return NextResponse.json(
-      { error: friendlyAiError(out.error || 'Не удалось получить ответ') },
-      { status: 503 },
-    );
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Сервер недоступен';
     return NextResponse.json({ error: friendlyAiError(msg) }, { status: 500 });
