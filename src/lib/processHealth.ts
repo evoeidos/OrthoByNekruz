@@ -106,7 +106,14 @@ export function startProcessHealthMonitor(): void {
       const cpuMs = (cpu.user + cpu.system) / 1000;
       const detail = `${describeStall(stalledMs, cpuMs, loads)}\n${processSnapshot()}`;
       console.warn('[processHealth] сервер замирал', stalledMs, detail);
-      alertAdmin('process:stall', `сервер замирал на ${Math.round(stalledMs / 1000)} с`, detail);
+      // Пауза почти без CPU и без загрузки модулей — платформа заморозила
+      // serverless-контейнер между запросами (путь /var/task). Это не
+      // исправить в коде, и алерт о ней — шум; вред для студентов, если он
+      // есть, покажет алерт о долгой блокировке пользователя.
+      const frozen = cpuMs < (stalledMs + TICK_MS) / 2 && loads.ms < stalledMs / 2;
+      if (!frozen) {
+        alertAdmin('process:stall', `сервер замирал на ${Math.round(stalledMs / 1000)} с`, detail);
+      }
     }
   }, TICK_MS);
   timer.unref?.();

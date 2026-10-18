@@ -36,6 +36,10 @@ Push в `main` сразу деплоится на Timeweb App Platform (`npm run
   `withUserLock` / `updateUser` из `src/lib/userLock.ts`. Иначе параллельный
   запрос затирает чужую запись (например, подтверждение оплаты админом).
   `auth.ts` и действия `admin-users` уже выполняются под блокировкой целиком.
+  Ответ клиенту — только после снятия блокировки: приложение крутится в
+  serverless-контейнере (`/var/task`), который замораживается сразу после
+  ответа, и блокировка повисла бы до следующего запроса. Обработчик, который
+  отвечает изнутри блокировки, оборачивай в `withUserLockResponse`.
 - **Авторизация API** — `resolveRequestIdentity` / `verifyApiStudyUser`
   (Telegram initData или cookie-сессия после входа через Telegram). Whitelist
   (`sub_whitelist`) снимает только проверку подписки на канал, личность он

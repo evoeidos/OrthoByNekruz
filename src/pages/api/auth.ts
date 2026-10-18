@@ -70,7 +70,7 @@ import {
 } from '@/lib/catalogBrowse';
 import { touchUserActivity, touchUserVisit } from '@/lib/userActivity';
 import { isRedisUnavailableError } from '@/lib/redisDegraded';
-import { isUserLockTimeout, withUserLock } from '@/lib/userLock';
+import { isUserLockTimeout, withUserLockResponse } from '@/lib/userLock';
 import { alertAdmin } from '@/lib/alertAdmin';
 
 const redis = createRedisFromEnv();
@@ -530,8 +530,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   // Всё чтение-запись пользователя дальше — под блокировкой (src/lib/userLock.ts):
   // иначе параллельный запрос мог затереть подтверждение оплаты админом.
+  // Ответ уходит после снятия блокировки: после ответа контейнер может
+  // заморозиться, и блокировка висела бы до следующего запроса.
   try {
-    return await withUserLock(redis, tgIdStr, async () => {
+    return await withUserLockResponse(redis, tgIdStr, res, async res => {
       const ip = getIp(req);
 
       let redisOk = true;

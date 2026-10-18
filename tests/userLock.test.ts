@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { updateUser, withUserLock } from '@/lib/userLock';
+import type { NextApiResponse } from 'next';
+import { updateUser, withUserLock, withUserLockResponse } from '@/lib/userLock';
 import { createFakeRedis, sleep } from './fakeRedis';
 
 describe('userLock', () => {
@@ -81,5 +82,36 @@ describe('userLock', () => {
     }) as typeof redis.set;
     await updateUser(redis, '7', u => u);
     expect(writes).toBe(0);
+  });
+
+  // Serverless-контейнер замораживается сразу после ответа: блокировка
+  // должна быть снята до того, как ответ ушёл клиенту.
+  it('ответ из-под блокировки уходит только после её снятия', async () => {
+    const redis = createFakeRedis();
+    const sent: Array<{ status: number; body: unknown; lockHeld: boolean }> = [];
+    let statusCode = 200;
+    const res = {
+      status(code: number) { statusCode = code; return res; },
+      json(body: unknown) {
+        sent.push({ status: statusCode, body, lockHeld: redis.store.has('user_lock:9') });
+        return res;
+      },
+    } as unknown as NextApiResponse;
+
+    await withUserLockResponse(redis, '9', res, async r => {
+      r.status(201).json({ ok: true });
+      expect(sent).toHaveLength(0);
+      expect(redis.store.has('user_lock:9')).toBe(true);
+    });
+
+    expect(sent).toEqual([{ status: 201, body: { ok: true }, lockHeld: false }]);
+  });
+
+  it('без ответа внутри блокировки ничего не отправляется', async () => {
+    const redis = createFakeRedis();
+    let calls = 0;
+    const res = { status() { return this; }, json() { calls++; return this; } } as unknown as NextApiResponse;
+    await withUserLockResponse(redis, '9', res, async () => {});
+    expect(calls).toBe(0);
   });
 });

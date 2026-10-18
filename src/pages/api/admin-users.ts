@@ -29,7 +29,7 @@ import { applyGroupAccessToUser, loadGroupAccessRules } from '@/lib/groupAccess'
 import { normalizePreviewModules, type PreviewModule } from '@/lib/previewModules';
 import { clearAuthRateLimitsForTgId } from '@/lib/authRateLimit';
 import { verifyAdminRequest } from '@/lib/adminAuth';
-import { isUserLockTimeout, withUserLock } from '@/lib/userLock';
+import { isUserLockTimeout, withUserLock, withUserLockResponse } from '@/lib/userLock';
 import { alertAdmin } from '@/lib/alertAdmin';
 import { getAllUserIds, registerUserId, removeUserId } from '@/lib/userIndex';
 import { isValidTelegramUsername, normalizeTelegramUsername } from '@/lib/tgLinks';
@@ -417,7 +417,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const auth = verifyAdminRequest(req);
   if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
   try {
-    return await withUserLock(redis, String(tgId), () => handleAdminUsers(req, res), `admin:${action}`);
+    return await withUserLockResponse(redis, String(tgId), res, lockedRes => handleAdminUsers(req, lockedRes), `admin:${action}`);
   } catch (e) {
     if (isUserLockTimeout(e)) {
       return res.status(503).json({ error: 'Студент сейчас что-то делает в приложении — повтори через пару секунд.' });

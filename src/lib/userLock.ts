@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { randomBytes } from 'crypto';
 import { monitorEventLoopDelay } from 'perf_hooks';
+import type { NextApiResponse } from 'next';
 import type { AppRedis } from '@/lib/redis';
 import { alertAdmin } from '@/lib/alertAdmin';
 import { processSnapshot } from '@/lib/processHealth';
@@ -131,6 +132,68 @@ export async function withUserLock<T>(
     if (token) await release(redis, id, token);
     const heldMs = Date.now() - startedAt;
     if (heldMs > SLOW_HOLD_MS) reportSlowHold(id, heldMs, label, stats);
+  }
+}
+
+// ─── Ответ после снятия блокировки ─────────────────────────────────────────
+//
+// Приложение работает в serverless-контейнере: как только ответ отправлен,
+// платформа может заморозить процесс до следующего запроса. Если отправить
+// ответ изнутри withUserLock, снятие блокировки (finally) «засыпало» вместе
+// с контейнером: блокировка висела секунды, следующий запрос того же
+// студента упирался в таймаут, а детектор замираний видел паузу почти без
+// CPU. Поэтому ответ придерживаем и отправляем, когда блокировка уже снята.
+
+const DEFERRED_METHODS = new Set(['json', 'send', 'end', 'redirect']);
+
+/** res, у которого json/send/end/redirect срабатывают только по flush(). */
+export function deferApiResponse(res: NextApiResponse): { res: NextApiResponse; flush: () => void } {
+  let pending: { method: string; args: unknown[] } | null = null;
+  const proxy: NextApiResponse = new Proxy(res, {
+    get(target, prop) {
+      if (typeof prop === 'string' && DEFERRED_METHODS.has(prop)) {
+        return (...args: unknown[]) => {
+          if (!pending) pending = { method: prop, args };
+          return proxy;
+        };
+      }
+      if (prop === 'status') {
+        return (code: number) => {
+          target.status(code);
+          return proxy;
+        };
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return {
+    res: proxy,
+    flush() {
+      if (!pending) return;
+      const { method, args } = pending;
+      pending = null;
+      (res as unknown as Record<string, (...a: unknown[]) => unknown>)[method](...args);
+    },
+  };
+}
+
+/**
+ * withUserLock для API-обработчика, который отвечает изнутри блокировки:
+ * fn получает свой res, а ответ уходит клиенту после снятия блокировки.
+ */
+export async function withUserLockResponse(
+  redis: AppRedis,
+  tgId: string,
+  res: NextApiResponse,
+  fn: (res: NextApiResponse) => Promise<unknown>,
+  label = 'unknown',
+): Promise<void> {
+  const deferred = deferApiResponse(res);
+  try {
+    await withUserLock(redis, tgId, () => fn(deferred.res), label);
+  } finally {
+    deferred.flush();
   }
 }
 
