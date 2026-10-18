@@ -18,6 +18,22 @@ const MAX_CONTEXT_CHARS = 12_000;
 const TIMEWEB_TIMEOUT_MS = 25_000; // reasoning-модель, отвечает дольше
 const PROVIDER_TIMEOUT_MS = 15_000;
 const TOTAL_BUDGET_MS = 50_000;
+// Reasoning-модели (DeepSeek V4 Flash) тратят ~800 токенов на цепочку мыслей
+// перед ответом — поэтому лимит выше, чем кажется нужным.
+const TIMEWEB_MAX_TOKENS = 2000;
+const FALLBACK_MAX_TOKENS = 600;
+
+/**
+ * Лимиты одного запроса к ИИ. Короткому объяснению вопроса хватает
+ * умолчаний; конспекту методички нужно больше токенов и времени.
+ */
+export type AiCallLimits = {
+  /** max_tokens для DeepSeek: рассуждения + сам ответ. */
+  timewebMaxTokens?: number;
+  timewebTimeoutMs?: number;
+  /** Бюджет времени на всю цепочку провайдеров. */
+  totalBudgetMs?: number;
+};
 
 /** fetch с жёстким таймаутом — иначе запрос может висеть бесконечно. */
 async function fetchWithTimeout(
@@ -86,7 +102,7 @@ export function friendlyAiError(raw: string): string {
   if (lower.includes('api key') || lower.includes('не настроен')) {
     return 'ИИ сейчас недоступен. Напиши @evoeidos — разберёмся.';
   }
-  if (lower.includes('пустой ответ')) {
+  if (lower.includes('пустой ответ') || lower.includes('обрезан')) {
     return 'ИИ не смог сформировать ответ. Попробуй переформулировать вопрос.';
   }
   return 'Не удалось получить ответ. Попробуй ещё раз чуть позже.';
@@ -149,7 +165,8 @@ async function callOpenAICompat(
   userPrompt: string,
   providerName: string,
   timeoutMs: number,
-): Promise<{ text?: string; error?: string }> {
+  maxTokens: number,
+): Promise<{ text?: string; error?: string; truncated?: boolean }> {
   let response: Response;
   try {
     response = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
@@ -165,9 +182,7 @@ async function callOpenAICompat(
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.6,
-        // Reasoning-модели (DeepSeek V4 Flash) тратят ~800 токенов на цепочку мыслей
-        // перед ответом — поэтому лимит выше, чем кажется нужным.
-        max_tokens: providerName === 'Timeweb' ? 2000 : 600,
+        max_tokens: maxTokens,
       }),
       cache: 'no-store',
     }, timeoutMs);
@@ -187,9 +202,19 @@ async function callOpenAICompat(
   }
 
   const data = await response.json();
-  const text: string = data.choices?.[0]?.message?.content || '';
-  if (!text) return { error: `${providerName} вернул пустой ответ` };
-  return { text };
+  const choice = data.choices?.[0];
+  const text: string = choice?.message?.content || '';
+  // finish_reason «length» — упёрлись в max_tokens. У reasoning-модели это
+  // часто значит, что весь лимит ушёл на рассуждения и ответа нет совсем.
+  const truncated = choice?.finish_reason === 'length';
+  if (!text) {
+    return {
+      error: truncated
+        ? `${providerName}: ответ обрезан лимитом ${maxTokens} токенов (ушли на рассуждения)`
+        : `${providerName} вернул пустой ответ (finish_reason: ${choice?.finish_reason ?? '—'})`,
+    };
+  }
+  return { text, truncated };
 }
 
 /**
@@ -201,7 +226,8 @@ async function callOpenAICompat(
 export async function generateQuestionAiAnswer(
   systemInstruction: string,
   userPrompt: string,
-): Promise<{ result?: string; error?: string }> {
+  limits: AiCallLimits = {},
+): Promise<{ result?: string; truncated?: boolean; error?: string; detail?: string }> {
   const timewebKey = process.env.TIMEWEB_AI_KEY?.trim();
   const groqKey    = process.env.GROQ_API_KEY?.trim();
   const geminiKey  = process.env.GEMINI_API_KEY?.trim();
@@ -210,24 +236,27 @@ export async function generateQuestionAiAnswer(
   // Общий бюджет на всю цепочку: каждый следующий провайдер получает
   // не больше, чем осталось от TOTAL_BUDGET_MS.
   const startedAt = Date.now();
-  const budgetLeft = () => TOTAL_BUDGET_MS - (Date.now() - startedAt);
+  const totalBudgetMs = limits.totalBudgetMs ?? TOTAL_BUDGET_MS;
+  const budgetLeft = () => totalBudgetMs - (Date.now() - startedAt);
   const slice = (want: number) => Math.min(want, budgetLeft());
 
   if (timewebKey && budgetLeft() > 1_000) {
     const tw = await callOpenAICompat(
       TIMEWEB_BASE_URL, timewebKey, TIMEWEB_MODEL,
-      systemInstruction, userPrompt, 'Timeweb', slice(TIMEWEB_TIMEOUT_MS),
+      systemInstruction, userPrompt, 'Timeweb',
+      slice(limits.timewebTimeoutMs ?? TIMEWEB_TIMEOUT_MS),
+      limits.timewebMaxTokens ?? TIMEWEB_MAX_TOKENS,
     );
-    if (tw.text) return { result: tw.text };
+    if (tw.text) return { result: tw.text, truncated: tw.truncated };
     if (tw.error) errors.push(tw.error);
   }
 
   if (groqKey && budgetLeft() > 1_000) {
     const groq = await callOpenAICompat(
       'https://api.groq.com/openai/v1', groqKey, GROQ_MODEL,
-      systemInstruction, userPrompt, 'Groq', slice(PROVIDER_TIMEOUT_MS),
+      systemInstruction, userPrompt, 'Groq', slice(PROVIDER_TIMEOUT_MS), FALLBACK_MAX_TOKENS,
     );
-    if (groq.text) return { result: groq.text };
+    if (groq.text) return { result: groq.text, truncated: groq.truncated };
     if (groq.error) errors.push(groq.error);
   }
 
@@ -253,5 +282,6 @@ export async function generateQuestionAiAnswer(
   }
 
   const last = errors[errors.length - 1] || 'Все провайдеры недоступны';
-  return { error: friendlyAiError(last) };
+  // error — студенту, detail — админу в алерт: что ответил каждый провайдер.
+  return { error: friendlyAiError(last), detail: errors.join('\n') || last };
 }

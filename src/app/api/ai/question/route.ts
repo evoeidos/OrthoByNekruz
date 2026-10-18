@@ -61,7 +61,7 @@ export async function POST(req: Request) {
     if (out.result) {
       return NextResponse.json({ result: out.result });
     }
-    alertAdmin('ai:question', 'ИИ: не удалось ответить на вопрос', out.error);
+    alertAdmin('ai:question', 'ИИ: не удалось ответить на вопрос', out.detail ?? out.error);
     return NextResponse.json(
       { error: friendlyAiError(out.error || 'Не удалось получить ответ') },
       { status: 503 },

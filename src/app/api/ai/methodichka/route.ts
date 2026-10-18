@@ -10,6 +10,15 @@ import { fetchUniversityMethodichka } from '@/lib/universityParser';
 const redis = createRedisFromEnv();
 const AI_CACHE_TTL_SEC = 60 * 60 * 24 * 30;
 
+// Конспект — длинный разбор по пяти разделам из методички до 30 000 символов.
+// DeepSeek сначала рассуждает, и лимита в 2000 токенов вопросов ему не
+// хватало: всё уходило на рассуждения, ответ приходил пустым.
+const METHODICHKA_AI_LIMITS = {
+  timewebMaxTokens: 8000,
+  timewebTimeoutMs: 90_000,
+  totalBudgetMs: 110_000,
+};
+
 export async function POST(req: Request) {
   let body: { tlId?: string; initData?: string; telegramId?: string; discipline?: string; topic?: string };
   try {
@@ -54,12 +63,14 @@ export async function POST(req: Request) {
     }
 
     const { systemInstruction, userPrompt } = buildMethodichkaPrompts(methodichka, context);
-    const out = await generateQuestionAiAnswer(systemInstruction, userPrompt);
+    const out = await generateQuestionAiAnswer(systemInstruction, userPrompt, METHODICHKA_AI_LIMITS);
     if (out.result) {
-      await redis.set(cacheKey, out.result, { ex: AI_CACHE_TTL_SEC });
+      // Обрезанный конспект отдаём, но не кэшируем на месяц — в следующий раз
+      // попробуем получить полный.
+      if (!out.truncated) await redis.set(cacheKey, out.result, { ex: AI_CACHE_TTL_SEC });
       return NextResponse.json({ result: out.result });
     }
-    alertAdmin('ai:methodichka', 'ИИ: не удалось сделать конспект методички', out.error);
+    alertAdmin('ai:methodichka', 'ИИ: не удалось сделать конспект методички', out.detail ?? out.error);
     return NextResponse.json(
       { error: friendlyAiError(out.error || 'Не удалось получить ответ') },
       { status: 503 },
