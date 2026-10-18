@@ -13,10 +13,14 @@ import {
   CheckCircle2, XCircle, RotateCcw, Zap, ChevronLeft, Search, Check,
   Medal, Pencil, Trash2, FileText, Shuffle, AlertTriangle, Flame,
   Award, ArrowRight, ArrowLeft, ChevronDown, BookOpen, Lightbulb,
-  Settings2, LogOut,
+  Settings2, LogOut, List, SlidersHorizontal,
   X,
 } from 'lucide-react';
-import { isCorrectTestOption, resolveCorrectOption } from '@/lib/testAnswers';
+import { isCorrectTestOption, normalizeTestOptionText, resolveCorrectOption } from '@/lib/testAnswers';
+import {
+  DEFAULT_TESTS_PER_BLOCK, MIN_TESTS_PER_BLOCK, MAX_TESTS_PER_BLOCK, TESTS_PER_BLOCK_PRESETS,
+  LS_TESTS_PER_BLOCK, clampTestsPerBlock, blockStorageKey,
+} from '@/lib/testBlocks';
 
 import { AppBrandIcon } from './AppBrandIcon';
 import ReactMarkdown from 'react-markdown';
@@ -34,15 +38,38 @@ interface MistakeRecord {
   ts: number;
 }
 
+/** Как открывается блок: решать тест или читать «вопрос — ответ» списком. */
+type OpenMode = 'solve' | 'list';
+
+interface TestBlock {
+  id: number;
+  localId: number;
+  /** Номер первого теста блока (с 1) — для нумерации в списке */
+  start: number;
+  range: string;
+  questions: any[];
+  size: number;
+  best: number;
+  status: 'perfect' | 'started' | 'new';
+}
+
 const LETTERS = ['А', 'Б', 'В', 'Г', 'Д', 'Е'];
 
 const LONG_PRESS_MS = 500;
+
+const LS_OPEN_MODE = 'tests_open_mode';
+
+/** Текст правильного ответа без метки варианта («2) …», «а) …»). */
+const correctAnswerText = (test: { options: string[]; correct: string }): string => {
+  const raw = resolveCorrectOption(test) || '';
+  return normalizeTestOptionText(raw) || raw.trim();
+};
 
 // ─── Block button (shared between flat and themed grids) ──────────────────────
 const BlockButton = ({
   b, onSelect, onStudySelect,
 }: {
-  b: { id: number; localId: number; range: string; size: number; best: number; status: 'perfect' | 'started' | 'new' };
+  b: Pick<TestBlock, 'id' | 'localId' | 'range' | 'size' | 'best' | 'status'>;
   onSelect: () => void;
   onStudySelect: () => void;
 }) => {
@@ -314,11 +341,13 @@ export const TestsTab = ({
 }) => {
   const cfg          = getSubject(subject);
   const accentColor  = cfg?.color || 'var(--c-primary)';
-  const lsScores     = subject === 'ortho' ? 'test_block_scores'    : `${cfg?.lsPrefix || subject}_test_block_scores`;
+  // Размер блока выбирает студент — результаты и попытки хранятся отдельно для каждого размера
+  const [testsPerBlock, setTestsPerBlock] = useState(DEFAULT_TESTS_PER_BLOCK);
+  const lsScores     = blockStorageKey(subject === 'ortho' ? 'test_block_scores' : `${cfg?.lsPrefix || subject}_test_block_scores`, testsPerBlock);
   const lsNote       = subject === 'ortho' ? 'tests_personal_note'  : `${cfg?.lsPrefix || subject}_tests_personal_note`;
   const lsMistakes   = subject === 'ortho' ? 'test_mistakes'        : `${cfg?.lsPrefix || subject}_test_mistakes`;
   const lsFavorites  = subject === 'ortho' ? 'test_favorites'       : `${cfg?.lsPrefix || subject}_test_favorites`;
-  const lsAttempts   = subject === 'ortho' ? 'test_block_attempts'  : `${cfg?.lsPrefix || subject}_test_block_attempts`;
+  const lsAttempts   = blockStorageKey(subject === 'ortho' ? 'test_block_attempts' : `${cfg?.lsPrefix || subject}_test_block_attempts`, testsPerBlock);
   const lsOnboarding = 'tests_mode_onboarding_dismissed';
   const lsStudyHintOpened = 'tests_study_hint_opened';
   // ── Data ──────────────────────────────────────────────────────────────────
@@ -364,8 +393,21 @@ export const TestsTab = ({
   const testScrollRef = useRef<HTMLDivElement>(null);
   const showResultRef = useRef(false);
   const [testSettingsOpen, setTestSettingsOpen] = useState(false);
+  const [openMode,         setOpenMode]         = useState<OpenMode>('solve');
+  const [listView,         setListView]         = useState<{ block: TestBlock; focusId?: string } | null>(null);
+  const [blockSizeOpen,    setBlockSizeOpen]    = useState(false);
+  const [blockSizeDraft,   setBlockSizeDraft]   = useState('');
+  const listScrollRef = useRef<HTMLDivElement>(null);
 
   // ── Effects ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LS_TESTS_PER_BLOCK);
+      if (saved) setTestsPerBlock(clampTestsPerBlock(saved));
+      if (localStorage.getItem(LS_OPEN_MODE) === 'list') setOpenMode('list');
+    } catch {}
+  }, []);
+
   useEffect(() => { setLocalTestsNote(testsNote); }, [testsNote]);
 
   useEffect(() => {
@@ -401,14 +443,23 @@ export const TestsTab = ({
     return () => { cancelled = true; };
   }, [subject, bustDataCache]);
 
-  // Сообщаем родителю про режим теста (открыт блок) — чтобы скрыть навигацию.
+  // Сообщаем родителю про режим теста (открыт блок или список) — чтобы скрыть навигацию.
+  const blockOpen = selectedBlock !== null || listView !== null;
   useEffect(() => {
-    onTestModeChange?.(selectedBlock !== null);
+    onTestModeChange?.(blockOpen);
     return () => onTestModeChange?.(false);
-  }, [selectedBlock, onTestModeChange]);
+  }, [blockOpen, onTestModeChange]);
+
+  // Список «вопрос — ответ»: из поиска — к найденному вопросу, иначе с начала
+  useEffect(() => {
+    if (!listView) return;
+    const target = listView.focusId ? document.getElementById(`test-list-${listView.focusId}`) : null;
+    if (target) target.scrollIntoView({ block: 'center', behavior: 'instant' });
+    else listScrollRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+  }, [listView]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const TESTS_PER_BLOCK = 25;
+  const TESTS_PER_BLOCK = testsPerBlock;
   const TOTAL_TESTS  = testsData.length;
   const TOTAL_BLOCKS = Math.ceil(TOTAL_TESTS / TESTS_PER_BLOCK);
 
@@ -421,13 +472,13 @@ export const TestsTab = ({
 
   const hasThemes = useMemo(() => processed.some((t: any) => t.theme || t.topic), [processed]);
 
-  // Плоские глобальные блоки — всегда 25 вопросов подряд, ID 1..N
-  const blocks = useMemo(() => Array.from({ length: TOTAL_BLOCKS }, (_, i) => {
+  // Плоские глобальные блоки — по TESTS_PER_BLOCK вопросов подряд, ID 1..N
+  const blocks = useMemo((): TestBlock[] => Array.from({ length: TOTAL_BLOCKS }, (_, i) => {
     const id = i + 1; const best = bestScores[id] || 0;
     const questions = processed.slice(i * TESTS_PER_BLOCK, (i + 1) * TESTS_PER_BLOCK);
     const size = questions.length;
     return {
-      id, localId: id,
+      id, localId: id, start: i * TESTS_PER_BLOCK + 1,
       range: `${i * TESTS_PER_BLOCK + 1}–${Math.min((i + 1) * TESTS_PER_BLOCK, TOTAL_TESTS)}`,
       questions, size, best,
       status: (best === size ? 'perfect' : best > 0 ? 'started' : 'new') as 'perfect' | 'started' | 'new',
@@ -449,12 +500,12 @@ export const TestsTab = ({
     }
     let blockId = -1;
     return groups.map(g => {
-      const tblocks: { id: number; localId: number; range: string; questions: any[]; size: number; best: number; status: 'perfect' | 'started' | 'new' }[] = [];
+      const tblocks: TestBlock[] = [];
       for (let i = 0; i < g.questions.length; i += TESTS_PER_BLOCK) {
         const chunk = g.questions.slice(i, i + TESTS_PER_BLOCK);
         const size = chunk.length;
         tblocks.push({
-          id: blockId--, localId: tblocks.length + 1,
+          id: blockId--, localId: tblocks.length + 1, start: i + 1,
           range: `${i + 1}–${Math.min(i + TESTS_PER_BLOCK, g.questions.length)}`,
           questions: chunk, size, best: 0,
           status: 'new',
@@ -576,10 +627,7 @@ export const TestsTab = ({
     });
   };
 
-  const openBlock = (
-    b: { id: number; questions: any[] },
-    entry: 'tap' | 'study',
-  ) => {
+  const startBlock = (b: TestBlock, entry: 'tap' | 'study') => {
     setTestSnapshot(b.questions || []);
     resetTest();
     setHintsEnabled(false);
@@ -596,6 +644,32 @@ export const TestsTab = ({
     setSelectedBlock(b.id);
     maybeShowOnboarding();
   };
+
+  /** Нажатие на блок: в режиме «Вопрос — ответ» открывает список, иначе тест. */
+  const openBlock = (b: TestBlock, entry: 'tap' | 'study') => {
+    if (openMode === 'list') {
+      setListView({ block: b });
+      return;
+    }
+    startBlock(b, entry);
+  };
+
+  const changeOpenMode = (mode: OpenMode) => {
+    setOpenMode(mode);
+    try { localStorage.setItem(LS_OPEN_MODE, mode); } catch {}
+  };
+
+  const applyBlockSize = (value: number) => {
+    const size = clampTestsPerBlock(value);
+    setTestsPerBlock(size);
+    try { localStorage.setItem(LS_TESTS_PER_BLOCK, String(size)); } catch {}
+    setBlockSizeDraft('');
+    setBlockSizeOpen(false);
+  };
+
+  /** Блоки того же ряда (общий список или одна тема) — для «Следующий блок» в списке. */
+  const blockSequence = (id: number): TestBlock[] =>
+    id > 0 ? blocks : themeGroups?.find(g => g.blocks.some(b => b.id === id))?.blocks ?? [];
 
   const use5050Hint = () => {
     if (!currentTest || showResultRef.current || studyMode || !hintsEnabled || hintLevel >= 1) return;
@@ -752,6 +826,10 @@ export const TestsTab = ({
     if (!info) return;
     const b = blocks.find(bl => bl.id === info.blockId);
     if (!b) return;
+    if (openMode === 'list') {
+      setListView({ block: b, focusId: id });
+      return;
+    }
     setTestSnapshot(b.questions || []);
     resetTest();
     const firstPass = (blockAttempts[b.id] || 0) === 0;
@@ -809,6 +887,112 @@ export const TestsTab = ({
     </div>
   </div>
 );
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // СПИСОК «ВОПРОС — ОТВЕТ» (только правильные ответы)
+  // ══════════════════════════════════════════════════════════════════════════
+  if (listView) {
+    const lb = listView.block;
+    const seq = blockSequence(lb.id);
+    const nextBlock = seq[seq.findIndex(x => x.id === lb.id) + 1];
+    const theme = lb.id < 0 ? themeGroups?.find(g => g.blocks.some(x => x.id === lb.id))?.theme : undefined;
+
+    return (
+      <div className="flex flex-col h-full overflow-hidden max-w-full" style={{ background: 'var(--c-bg)' }}>
+        <div className="px-3.5 py-2.5 sticky top-0 z-20 flex items-center gap-2.5"
+          style={{
+            background: 'color-mix(in srgb, var(--c-bg) 95%, transparent)',
+            backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+            borderBottom: '1px solid var(--c-border)',
+            paddingTop: 'calc(var(--header-pt) + 20px)',
+          }}>
+          <button onClick={() => setListView(null)} aria-label="К выбору блоков"
+            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 active:scale-95 relative before:absolute before:-inset-1.5 before:content-['']"
+            style={{ background: 'transparent', border: '1px solid var(--c-border)', color: 'var(--c-muted)' }}>
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className="text-[11.5px] font-mono font-bold truncate" style={{ color: 'var(--c-text)' }}>
+              {theme ? `${theme} · ` : ''}Блок {lb.localId}
+              <span style={{ color: 'var(--c-muted)' }}> · {lb.range}</span>
+            </div>
+            <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--c-muted)' }}>
+              Вопрос — ответ · {lb.size} тестов
+            </div>
+          </div>
+          <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+            style={{ background: 'var(--c-primary-dim)', color: 'var(--c-primary)' }}>
+            <List className="w-4 h-4" />
+          </span>
+        </div>
+
+        <div ref={listScrollRef} className="flex-1 overflow-y-auto scroll-container">
+          <div className="px-4 pt-3 mx-auto max-w-2xl flex flex-col gap-2.5" style={{ paddingBottom: 'var(--scroll-pb)' }}>
+            {lb.questions.map((t: any, idx: number) => {
+              const answer = correctAnswerText(t);
+              const fav = isFavorite(t);
+              return (
+                <div key={t.id} id={`test-list-${t.id}`} className="rounded-[13px] p-3.5"
+                  style={{
+                    background: 'var(--c-card)',
+                    border: `1px solid ${listView.focusId === t.id ? 'var(--c-primary-br)' : 'var(--c-border)'}`,
+                  }}>
+                  <div className="flex items-start gap-2.5">
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md flex-shrink-0 mt-0.5"
+                      style={{ background: 'var(--c-chip)', color: 'var(--c-muted)' }}>
+                      {lb.start + idx}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <RichText
+                        text={t.question || ''}
+                        relatedTerms={itemRelatedTerms(t)}
+                        glossaryTerms={dynamicGlossary}
+                        fontSize={14}
+                        className="font-semibold [&>p]:indent-0 [&>p]:mt-0"
+                      />
+                    </div>
+                    <button type="button" onClick={() => toggleFavorite(t)}
+                      aria-label={fav ? 'Убрать из избранного' : 'В избранное'}
+                      className="w-7 h-7 -mt-0.5 flex items-center justify-center rounded-lg flex-shrink-0 transition-all active:scale-90"
+                      style={{ background: fav ? 'color-mix(in srgb, var(--c-amber) 18%, transparent)' : 'transparent' }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill={fav ? 'var(--c-amber)' : 'none'} stroke={fav ? 'var(--c-amber)' : 'var(--c-text-faint)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="mt-2.5 rounded-[10px] px-3 py-2 flex items-start gap-2"
+                    style={answer
+                      ? { background: 'var(--c-primary-dim)', border: '1px solid var(--c-primary-br)' }
+                      : { background: 'var(--c-bg-subtle)', border: '1px solid var(--c-border)' }}>
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: answer ? 'var(--c-primary)' : 'var(--c-text-faint)' }} />
+                    <span className="text-[13.5px] leading-snug"
+                      style={answer ? { color: 'var(--c-primary)', fontWeight: 600 } : { color: 'var(--c-muted)', fontStyle: 'italic' }}>
+                      {answer || 'Ответ не указан в ключе'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+
+            <div className="flex flex-col gap-2 mt-2">
+              <button type="button" onClick={() => { setListView(null); startBlock(lb, 'tap'); }}
+                className="h-[48px] rounded-[13px] font-bold text-[14px] inline-flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                style={{ background: 'var(--c-primary)', color: 'var(--c-bg)', boxShadow: '0 6px 18px var(--c-primary-dim)' }}>
+                <Check className="w-[15px] h-[15px]" /> Решать этот блок
+              </button>
+              {nextBlock && (
+                <button type="button" onClick={() => setListView({ block: nextBlock })}
+                  className="h-[48px] rounded-[13px] font-semibold text-[14px] inline-flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                  style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)', color: 'var(--c-text)' }}>
+                  Следующий блок · {nextBlock.range} <ArrowRight className="w-[15px] h-[15px]" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // ЭКРАН ВЫБОРА БЛОКА
@@ -942,16 +1126,52 @@ export const TestsTab = ({
                   })}
                 </div>
 
-                <BlockOpenHint
-                  expanded={studyHintOpen}
-                  onToggle={toggleStudyHint}
-                  showHintAttention={!studyHintEverOpened && !studyHintOpen}
-                />
+                {/* Как открывать блок: решать тест или читать «вопрос — ответ» */}
+                <div className="flex p-1 gap-1 rounded-[12px] mb-3"
+                  style={{ background: 'var(--c-bg-subtle)', border: '1px solid var(--c-border)' }}>
+                  {([
+                    { mode: 'solve', label: 'Решать тест',    Icon: Check },
+                    { mode: 'list',  label: 'Вопрос — ответ', Icon: List },
+                  ] as const).map(({ mode, label, Icon }) => {
+                    const active = openMode === mode;
+                    return (
+                      <button key={mode} type="button" onClick={() => changeOpenMode(mode)}
+                        className="flex-1 h-9 rounded-[9px] inline-flex items-center justify-center gap-1.5 text-[12px] font-bold transition-all active:scale-[0.98]"
+                        style={active
+                          ? { background: 'var(--c-card)', border: '1px solid var(--c-border)', color: 'var(--c-text)' }
+                          : { background: 'transparent', border: '1px solid transparent', color: 'var(--c-muted)' }}>
+                        <Icon className="w-3.5 h-3.5" style={{ color: active ? 'var(--c-primary)' : undefined }} />
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
 
-                {/* Заголовок «Блоки» + переключатель по темам */}
+                {openMode === 'list' ? (
+                  <p className="text-[11px] leading-snug mb-3 px-1" style={{ color: 'var(--c-muted)' }}>
+                    Нажми на блок — откроется список вопросов только с правильными ответами, без неверных вариантов.
+                  </p>
+                ) : (
+                  <BlockOpenHint
+                    expanded={studyHintOpen}
+                    onToggle={toggleStudyHint}
+                    showHintAttention={!studyHintEverOpened && !studyHintOpen}
+                  />
+                )}
+
+                {/* Заголовок «Блоки» + размер блока + переключатель по темам */}
                 <div className="flex items-center justify-between mb-2 px-1">
                   <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--c-muted)' }}>Блоки</span>
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { setBlockSizeDraft(''); setBlockSizeOpen(true); }}
+                      className="text-[10px] font-bold px-2 py-1 rounded-lg inline-flex items-center gap-1 transition-all active:scale-95"
+                      style={{ background: 'var(--c-chip)', color: 'var(--c-muted)', border: '1px solid var(--c-border)' }}
+                    >
+                      <SlidersHorizontal className="w-3 h-3" />
+                      по {testsPerBlock}
+                    </button>
                     {hasThemes && (
                       <button
                         onClick={() => { setShowByTheme(v => !v); setExpandedThemes(new Set()); }}
@@ -1058,6 +1278,57 @@ export const TestsTab = ({
                     )}
                   </div>
                 )}
+
+                {/* Выбор размера блока */}
+                <Dialog open={blockSizeOpen} onOpenChange={setBlockSizeOpen}>
+                  <DialogContent className="max-w-sm w-[92vw] rounded-3xl p-6" style={{ background: 'var(--c-card)', border: '1px solid var(--c-border)' }}>
+                    <DialogHeader>
+                      <DialogTitle className="text-[15px] font-bold leading-snug flex items-center gap-2" style={{ color: 'var(--c-text)' }}>
+                        <SlidersHorizontal className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--c-primary)' }} />
+                        По сколько тестов в блоке
+                      </DialogTitle>
+                    </DialogHeader>
+                    <div className="mt-3 grid grid-cols-4 gap-2">
+                      {TESTS_PER_BLOCK_PRESETS.map(n => {
+                        const active = n === testsPerBlock;
+                        return (
+                          <button key={n} type="button" onClick={() => applyBlockSize(n)}
+                            className="h-11 rounded-[11px] text-[14px] font-mono font-bold transition-all active:scale-95"
+                            style={active
+                              ? { background: 'var(--c-primary-dim)', border: '1px solid var(--c-primary-br)', color: 'var(--c-primary)' }
+                              : { background: 'var(--c-bg-subtle)', border: '1px solid var(--c-border)', color: 'var(--c-text)' }}>
+                            {n}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <form className="mt-3 flex gap-2"
+                      onSubmit={e => { e.preventDefault(); if (blockSizeDraft) applyBlockSize(Number(blockSizeDraft)); }}>
+                      <Input
+                        inputMode="numeric"
+                        placeholder={`Своё число: ${MIN_TESTS_PER_BLOCK}–${MAX_TESTS_PER_BLOCK}`}
+                        value={blockSizeDraft}
+                        onChange={e => setBlockSizeDraft(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                        className="h-11 flex-1 border focus-visible:ring-0 focus-visible:ring-offset-0 text-sm rounded-[11px]"
+                        style={{ background: 'var(--c-bg-subtle)', borderColor: 'var(--c-border)', color: 'var(--c-text)', caretColor: 'var(--c-primary)' }}
+                      />
+                      <button type="submit" disabled={!blockSizeDraft}
+                        className="h-11 px-4 rounded-[11px] font-bold text-[13px] transition-all active:scale-95 disabled:opacity-40"
+                        style={{ background: 'var(--c-primary)', color: 'var(--c-bg)' }}>
+                        OK
+                      </button>
+                    </form>
+                    {(() => {
+                      const size = blockSizeDraft ? clampTestsPerBlock(blockSizeDraft) : testsPerBlock;
+                      return (
+                        <p className="mt-3 text-[11.5px] leading-snug" style={{ color: 'var(--c-muted)' }}>
+                          {TOTAL_TESTS > 0 && <>{TOTAL_TESTS} тестов → {Math.ceil(TOTAL_TESTS / size)} блоков по {size}. </>}
+                          Лучшие результаты сохраняются отдельно для каждого размера — вернёшься к прежнему, и они снова будут на месте.
+                        </p>
+                      );
+                    })()}
+                  </DialogContent>
+                </Dialog>
 
                 {/* Заметки — внизу, не перекрывают блоки */}
                 <Dialog>

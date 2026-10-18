@@ -24,6 +24,7 @@ import { UniScheduleTab } from './UniScheduleTab';
 import { UniGradesTab } from './UniGradesTab';
 import { UniLibraryTab } from './UniLibraryTab';
 import { EMPTY_UNI, type UniData } from '@/lib/uniHelpers';
+import { bestTestScoreTotal, blockScoreKeys } from '@/lib/testBlocks';
 
 type TabId = 'progress' | 'schedule' | 'grades' | 'library' | 'more';
 const TABS: { id: TabId; label: string }[] = [
@@ -410,17 +411,13 @@ export const StatsTab: React.FC<StatsTabProps> = ({
     try { setStudiedCount(JSON.parse(localStorage.getItem(LS.studied) || '[]').length); }       catch { setStudiedCount(0); }
     try { setResolvedTasksCount(JSON.parse(localStorage.getItem(LS.tasks) || '[]').length); }   catch { setResolvedTasksCount(0); }
     try {
-      const sc = JSON.parse(localStorage.getItem(LS.testScores) || '{}');
-      setTestsResolvedCount(Math.min(
-        Object.values(sc).reduce((a: number, b: any) => a + b, 0) as number,
-        total.ts,
-      ));
+      setTestsResolvedCount(Math.min(bestTestScoreTotal(localStorage, LS.testScores), total.ts));
     } catch { setTestsResolvedCount(0); }
   };
 
   const resetAll = () => {
     if (!window.confirm('⚠️ Прогресс по этому предмету будет сброшен. Заметки останутся.')) return;
-    [LS.studied, LS.tasks, LS.testScores].forEach(k => localStorage.removeItem(k));
+    [LS.studied, LS.tasks, ...blockScoreKeys(localStorage, LS.testScores)].forEach(k => localStorage.removeItem(k));
     loadStats();
   };
 
