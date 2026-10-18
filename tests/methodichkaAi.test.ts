@@ -91,6 +91,16 @@ describe('конспект методички от ИИ', () => {
     expect(generate).toHaveBeenCalledTimes(2);
   });
 
+  it('обрезанный конспект сохраняется на неделю и не генерируется заново', async () => {
+    generate.mockResolvedValueOnce({ result: 'длинный конспект без конца', truncated: true });
+    await ask('100001');
+    const again = await ask('100001');
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(again.body.result).toBe('длинный конспект без конца');
+    const saved = redis.store.get('ai:methodichka:v3:stomatology:555') as { truncated?: boolean };
+    expect(saved.truncated).toBe(true);
+  });
+
   it('неудача ИИ не сохраняется и снимает блокировку', async () => {
     generate.mockResolvedValueOnce({ error: 'пусто' });
     const failed = await ask('100001');

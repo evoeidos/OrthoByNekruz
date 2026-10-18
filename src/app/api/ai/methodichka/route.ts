@@ -18,18 +18,19 @@ import { facultyFromStudyGroup } from '@/lib/studyGroup';
 const redis = createRedisFromEnv();
 
 // Конспект — длинный разбор по пяти разделам из методички до 30 000 символов.
-// DeepSeek сначала рассуждает, и лимита в 2000 токенов вопросов ему не
-// хватало: всё уходило на рассуждения, ответ приходил пустым.
+// DeepSeek сначала рассуждает: 2000 токенов вопросов уходили на рассуждения
+// целиком, а 8000 не хватало длинным методичкам (разбор до ~19 КБ) — ответ
+// обрезался и не сохранялся, студент при повторном нажатии ждал заново.
 const METHODICHKA_AI_LIMITS = {
-  timewebMaxTokens: 8000,
-  timewebTimeoutMs: 90_000,
-  totalBudgetMs: 110_000,
+  timewebMaxTokens: 16_000,
+  timewebTimeoutMs: 150_000,
+  totalBudgetMs: 170_000,
 };
 
 // Блокировка генерации живёт чуть дольше бюджета ИИ; ждущие проверяют,
 // не появился ли конспект, раз в пару секунд.
-const GENERATE_LOCK_SEC = 150;
-const WAIT_FOR_OTHER_MS = 120_000;
+const GENERATE_LOCK_SEC = 200;
+const WAIT_FOR_OTHER_MS = 180_000;
 const WAIT_POLL_MS = 2_000;
 
 /** Факультет студента из профиля, а не от клиента; по группе, если не выбран. */
@@ -122,9 +123,16 @@ export async function POST(req: Request) {
       const { systemInstruction, userPrompt } = buildMethodichkaPrompts(methodichka, context);
       const out = await generateQuestionAiAnswer(systemInstruction, userPrompt, METHODICHKA_AI_LIMITS);
       if (out.result) {
-        // Обрезанный конспект отдаём, но не сохраняем — в следующий раз
-        // попробуем получить полный.
-        if (!out.truncated) await saveMethodichkaAi(redis, tlId, faculty.id, hash, out.result);
+        // Обрезанный конспект тоже сохраняем — иначе каждое нажатие
+        // генерировало бы его заново, — но на неделю и с алертом о лимите.
+        await saveMethodichkaAi(redis, tlId, faculty.id, hash, out.result, !!out.truncated);
+        if (out.truncated) {
+          alertAdmin(
+            'ai:methodichka:truncated',
+            'ИИ: конспект методички обрезан лимитом токенов',
+            `методичка ${tlId}, ${faculty.id}\n${out.detail ?? ''}`,
+          );
+        }
         return NextResponse.json({ result: out.result });
       }
       alertAdmin('ai:methodichka', 'ИИ: не удалось сделать конспект методички', out.detail ?? out.error);

@@ -94,7 +94,16 @@ export function buildMethodichkaPrompts(m: UniversityMethodichka, context: Metho
 // если преподаватель поменял текст методички, хэш не совпадёт и конспект
 // пересоздастся.
 
-export type StoredMethodichkaAi = { hash: string; result: string; createdAt: string };
+export type StoredMethodichkaAi = {
+  hash: string;
+  result: string;
+  createdAt: string;
+  /** Ответ ИИ упёрся в лимит токенов — хранится неделю, потом новая попытка. */
+  truncated?: boolean;
+};
+
+/** Обрезанный конспект не держим вечно: через неделю попробуем получить полный. */
+const TRUNCATED_KEEP_SEC = 7 * 24 * 60 * 60;
 
 /** facultyId — 'stomatology' | 'therapeutic' | 'pediatrics' или 'general', если факультет неизвестен. */
 export const methodichkaAiKey = (tlId: string, facultyId: string) =>
@@ -117,7 +126,12 @@ export async function loadStoredMethodichkaAi(
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Partial<StoredMethodichkaAi>;
   if (typeof r.hash !== 'string' || typeof r.result !== 'string' || !r.result) return null;
-  return { hash: r.hash, result: r.result, createdAt: String(r.createdAt ?? '') };
+  return {
+    hash: r.hash,
+    result: r.result,
+    createdAt: String(r.createdAt ?? ''),
+    ...(r.truncated === true ? { truncated: true } : {}),
+  };
 }
 
 export async function saveMethodichkaAi(
@@ -126,7 +140,17 @@ export async function saveMethodichkaAi(
   facultyId: string,
   hash: string,
   result: string,
+  truncated = false,
 ): Promise<void> {
-  const record: StoredMethodichkaAi = { hash, result, createdAt: new Date().toISOString() };
-  await redis.set(methodichkaAiKey(tlId, facultyId), record);
+  const record: StoredMethodichkaAi = {
+    hash,
+    result,
+    createdAt: new Date().toISOString(),
+    ...(truncated ? { truncated: true } : {}),
+  };
+  if (truncated) {
+    await redis.set(methodichkaAiKey(tlId, facultyId), record, { ex: TRUNCATED_KEEP_SEC });
+  } else {
+    await redis.set(methodichkaAiKey(tlId, facultyId), record);
+  }
 }

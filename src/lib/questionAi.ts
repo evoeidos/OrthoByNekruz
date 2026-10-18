@@ -166,7 +166,7 @@ async function callOpenAICompat(
   providerName: string,
   timeoutMs: number,
   maxTokens: number,
-): Promise<{ text?: string; error?: string; truncated?: boolean }> {
+): Promise<{ text?: string; error?: string; truncated?: boolean; usage?: string }> {
   let response: Response;
   try {
     response = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
@@ -207,6 +207,12 @@ async function callOpenAICompat(
   // finish_reason «length» — упёрлись в max_tokens. У reasoning-модели это
   // часто значит, что весь лимит ушёл на рассуждения и ответа нет совсем.
   const truncated = choice?.finish_reason === 'length';
+  // Расход токенов — для алерта об обрезанном ответе: видно, сколько ушло на рассуждения.
+  const completion = data.usage?.completion_tokens;
+  const reasoning = data.usage?.completion_tokens_details?.reasoning_tokens;
+  const usage = completion != null
+    ? `${providerName}: ${completion} из ${maxTokens} токенов${reasoning != null ? `, на рассуждения ${reasoning}` : ''}`
+    : undefined;
   if (!text) {
     return {
       error: truncated
@@ -214,7 +220,7 @@ async function callOpenAICompat(
         : `${providerName} вернул пустой ответ (finish_reason: ${choice?.finish_reason ?? '—'})`,
     };
   }
-  return { text, truncated };
+  return { text, truncated, usage };
 }
 
 /**
@@ -228,6 +234,7 @@ export async function generateQuestionAiAnswer(
   userPrompt: string,
   limits: AiCallLimits = {},
 ): Promise<{ result?: string; truncated?: boolean; error?: string; detail?: string }> {
+  // detail: при ошибке — что ответил каждый провайдер, при успехе — расход токенов.
   const timewebKey = process.env.TIMEWEB_AI_KEY?.trim();
   const groqKey    = process.env.GROQ_API_KEY?.trim();
   const geminiKey  = process.env.GEMINI_API_KEY?.trim();
@@ -247,7 +254,7 @@ export async function generateQuestionAiAnswer(
       slice(limits.timewebTimeoutMs ?? TIMEWEB_TIMEOUT_MS),
       limits.timewebMaxTokens ?? TIMEWEB_MAX_TOKENS,
     );
-    if (tw.text) return { result: tw.text, truncated: tw.truncated };
+    if (tw.text) return { result: tw.text, truncated: tw.truncated, detail: tw.usage };
     if (tw.error) errors.push(tw.error);
   }
 
@@ -256,7 +263,7 @@ export async function generateQuestionAiAnswer(
       'https://api.groq.com/openai/v1', groqKey, GROQ_MODEL,
       systemInstruction, userPrompt, 'Groq', slice(PROVIDER_TIMEOUT_MS), FALLBACK_MAX_TOKENS,
     );
-    if (groq.text) return { result: groq.text, truncated: groq.truncated };
+    if (groq.text) return { result: groq.text, truncated: groq.truncated, detail: groq.usage };
     if (groq.error) errors.push(groq.error);
   }
 
