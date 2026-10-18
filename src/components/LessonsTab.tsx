@@ -60,7 +60,6 @@ interface LessonContent {
   images?: string[];
   questions?: string[];
   tests?: LessonTest[];
-  testAnswersLocked?: boolean;
 }
 
 interface FlatLesson {
@@ -972,13 +971,7 @@ function ReadingView({
           ) : null}
 
           {lesson.tests?.length ? (
-            <TestsView
-              key={`t-${lesson.id}`}
-              tests={lesson.tests}
-              answersLocked={!!lesson.testAnswersLocked}
-              accent={accent}
-              fontSize={fontSize}
-            />
+            <TestsView key={`t-${lesson.id}`} tests={lesson.tests} accent={accent} fontSize={fontSize} />
           ) : null}
 
           {lesson.note && (
@@ -1309,48 +1302,15 @@ function QuestionsView({
 }
 
 function TestsView({
-  tests, answersLocked, accent, fontSize,
-}: { tests: LessonTest[]; answersLocked: boolean; accent: string; fontSize: number }) {
-  // Сначала студент решает сам, ответы — по кнопке
-  const [showAnswers, setShowAnswers] = useState(false);
-  const answered = tests.filter(t => t.answer !== undefined).length;
+  tests, accent, fontSize,
+}: { tests: LessonTest[]; accent: string; fontSize: number }) {
   return (
     <CollapsibleBlock
       icon={<ListChecks className="w-4 h-4" />}
       label="Тесты для самопроверки"
       count={tests.length}
-      hint={answered ? `${tests.length} из методички · ответы к ${answered}` : undefined}
       accent={accent}
     >
-      {answered > 0 && (
-        <button
-          type="button"
-          onClick={() => setShowAnswers(v => !v)}
-          className="flex items-center justify-center gap-2 w-full mb-4 rounded-xl px-3 py-2.5 text-[13px] font-semibold active:opacity-70 transition-opacity"
-          style={{
-            background: showAnswers ? 'var(--c-bg-subtle)' : 'var(--c-primary-soft)',
-            border: `1px solid ${showAnswers ? 'var(--c-border)' : 'var(--c-primary-br)'}`,
-            color: showAnswers ? 'var(--c-muted)' : 'var(--c-primary)',
-          }}
-          aria-pressed={showAnswers}
-        >
-          <CheckCircle2 className="w-4 h-4" />
-          {showAnswers
-            ? 'Скрыть ответы'
-            : answered === tests.length
-              ? 'Показать ответы'
-              : `Показать ответы (есть к ${answered} из ${tests.length})`}
-        </button>
-      )}
-      {answersLocked && (
-        <div
-          className="flex gap-2 items-start mb-4 rounded-xl px-3 py-2.5 text-[12.5px] leading-snug"
-          style={{ background: 'var(--c-bg-subtle)', color: 'var(--c-muted)' }}
-        >
-          <Info className="w-4 h-4 flex-shrink-0 mt-px" />
-          <span>Ответы к этим тестам есть в разделе «Тесты» — они появятся здесь, когда раздел будет открыт.</span>
-        </div>
-      )}
       <ol className="flex flex-col gap-4">
         {tests.map((t, i) => (
           <li key={i} className="flex flex-col gap-2">
@@ -1364,36 +1324,23 @@ function TestsView({
               </span>
             </div>
             <ul className="flex flex-col gap-1.5 pl-8">
-              {t.options.map((o, oi) => {
-                const correct = showAnswers && t.answer === oi;
-                return (
-                  <li
-                    key={oi}
-                    className="flex gap-2 items-start leading-snug break-words rounded-lg px-2.5 py-1.5"
-                    style={{
-                      fontSize: `${fontSize * 0.88}px`,
-                      color: correct ? 'var(--c-text)' : 'color-mix(in srgb, var(--c-text) 88%, transparent)',
-                      background: correct ? 'var(--c-primary-soft)' : 'var(--c-bg-subtle)',
-                      boxShadow: correct ? 'inset 0 0 0 1px var(--c-primary-br)' : undefined,
-                      fontWeight: correct ? 600 : undefined,
-                    }}
-                  >
-                    <span className="flex-shrink-0 font-bold" style={{ color: correct ? 'var(--c-primary)' : 'var(--c-muted)' }}>
-                      {TEST_LETTERS[oi] ?? oi + 1})
-                    </span>
-                    <span className="flex-1 min-w-0">{o}</span>
-                    {correct && (
-                      <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-px" style={{ color: 'var(--c-primary)' }} aria-label="Правильный ответ" />
-                    )}
-                  </li>
-                );
-              })}
+              {t.options.map((o, oi) => (
+                <li
+                  key={oi}
+                  className="flex gap-2 items-start leading-snug break-words rounded-lg px-2.5 py-1.5"
+                  style={{
+                    fontSize: `${fontSize * 0.88}px`,
+                    color: 'color-mix(in srgb, var(--c-text) 88%, transparent)',
+                    background: 'var(--c-bg-subtle)',
+                  }}
+                >
+                  <span className="flex-shrink-0 font-bold" style={{ color: 'var(--c-muted)' }}>
+                    {TEST_LETTERS[oi] ?? oi + 1})
+                  </span>
+                  <span>{o}</span>
+                </li>
+              ))}
             </ul>
-            {showAnswers && t.answer === undefined && (
-              <span className="pl-8 text-[11.5px]" style={{ color: 'var(--c-muted)' }}>
-                Этого теста нет в разделе «Тесты» — ответа нет
-              </span>
-            )}
           </li>
         ))}
       </ol>

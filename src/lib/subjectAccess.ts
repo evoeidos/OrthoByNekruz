@@ -1,8 +1,8 @@
 /**
- * Доступ студента к платному контенту предмета — общая проверка для
- * /api/subject-data и ответов к тестам в занятиях (/api/curriculum).
+ * Доступ студента к платному контенту предмета: проверки /api/subject-data
+ * и вкладки «Занятия» (/api/curriculum).
  */
-import { isPreviewExpired, isPreviewModuleTrialExpired } from '@/lib/preview';
+import { isPreviewModuleTrialExpired } from '@/lib/preview';
 import { userHasModuleDataAccess } from '@/lib/previewModuleStatus';
 
 export type ModuleDataType = 'questions' | 'tests' | 'tasks' | 'glossary';
@@ -36,17 +36,4 @@ export function moduleAccessError(
     return 'Preview module expired';
   }
   return null;
-}
-
-/** Всё, что проверяет /api/subject-data перед выдачей раздела, одним вызовом. */
-export function canReadSubjectModule(
-  user: any,
-  subjectId: string,
-  dataType: ModuleDataType,
-  tgId: string,
-): boolean {
-  if (!user || user.blocked === true) return false;
-  if (user.previewStatus === 'active' && isPreviewExpired(user, Date.now(), tgId)) return false;
-  if (!userHasSubject(user, subjectId)) return false;
-  return moduleAccessError(user, subjectId, dataType, tgId) === null;
 }
