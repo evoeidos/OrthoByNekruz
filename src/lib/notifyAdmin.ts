@@ -18,8 +18,6 @@ export async function notifyAdminReceiptClaimed(params: {
   username?: string | null;
   subjectId: string;
   modules: PreviewModule[];
-  /** false — повторная заявка: временный час по разделу уже был, доступа нет. */
-  trustGranted?: boolean;
 }): Promise<void> {
   if (!BOT_TOKEN || !ADMIN_TG_ID) {
     console.error('[notifyAdmin] BOT_TOKEN или ADMIN_TG_ID не заданы');
@@ -36,12 +34,10 @@ export async function notifyAdminReceiptClaimed(params: {
     : '—';
 
   const text = [
-    '💳 <b>ByNekruz — скинул чек</b>',
+    '💳 <b>ByNekruz — скинул чек</b>', 
     '',
     'Студент нажал «Скинул — войти».',
-    params.trustGranted === false
-      ? '⚠️ <b>Повторная заявка</b> — временный час по этому разделу уже был, доступ <b>не открыт</b>. Проверь оплату на СБП.'
-      : 'Временный доступ открыт на <b>1 час</b> — проверь, пришла ли оплата на СБП.',
+    'Временный доступ открыт на <b>1 час</b> — проверь, пришла ли оплата на СБП.',
     '',
     `Telegram ID: <code>${esc(String(params.tgId))}</code>`,
     `Имя: ${esc(name)}`,
@@ -50,9 +46,7 @@ export async function notifyAdminReceiptClaimed(params: {
     `Заявка: <b>${esc(subjectLabel)}</b> · ${esc(modulesLabel)}`,
     '',
     'В админке: ✓ подтвердить или ✕ отказ.',
-    params.trustGranted === false
-      ? 'Заявка ждёт тебя и сама не закроется.'
-      : 'Не оплатил — жми ✕, иначе через час доступ сам закроется.',
+    'Не оплатил — жми ✕, иначе через час доступ сам закроется.',
   ].join('\n');
 
   try {
@@ -65,7 +59,7 @@ export async function notifyAdminReceiptClaimed(params: {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [[
-            { text: '⚙️ Открыть админку', web_app: { url: ADMIN_URL, fullscreen: true } },
+            { text: '⚙️ Открыть админку', web_app: { url: ADMIN_URL } },
           ]],
         },
       }),

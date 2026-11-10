@@ -19,3 +19,7 @@ scripts/__pycache__/
 build_out.txt
 pdf_bio_answers.json
 pdf_mismatches.json
+my-video/
+*.html
+test-krasgmu-*.mjs
+tmp_*.html
